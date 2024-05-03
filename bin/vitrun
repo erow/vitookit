@@ -1,0 +1,38 @@
+#!/usr/bin/env python
+
+import pkg_resources
+# import sys
+
+def get_install_location(package_name):
+    try:
+        distribution = pkg_resources.get_distribution(package_name)
+        print(distribution.location)
+    except pkg_resources.DistributionNotFound:
+        print(f"The package '{package_name}' is not installed.")
+
+# Replace 'numpy' with the name of the package you're interested in
+pack_path = pkg_resources.get_distribution('vitookit').location
+
+# # replace the program name with the absolute path of the script you want to run
+# argv = [ os.path.join(pack_path,'vitookit','evaluation',i) if ".py" in i else i for i in sys.argv[1:]]
+# # Pass all script arguments to eval_cls.py
+# os.system(f"torchrun {' '.join(argv)}")
+
+import re
+import sys, os
+from torch.distributed.run import parse_args, config_from_args, elastic_launch, uuid
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    
+    args = parse_args(None)
+    if args.standalone:
+        args.rdzv_backend = "c10d"
+        args.rdzv_endpoint = "localhost:0"
+        args.rdzv_id = str(uuid.uuid4())
+    config, cmd, cmd_args = config_from_args(args)
+    cmd_args[1] = os.path.join(pack_path, 'vitookit', 'evaluation', cmd_args[1])
+    # print(cmd, cmd_args)
+    elastic_launch(
+        config=config,
+        entrypoint=cmd,
+    )(*cmd_args)
