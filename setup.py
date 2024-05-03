@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='ViTookit',
+    name='vitookit',
     author='Gent',
     author_email='clouderow@gmail.com',
     decscription='A toolkit for evaluating and analyzing vision models',

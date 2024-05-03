@@ -4,7 +4,7 @@ We aim to provide a tookit for evaluating and analyzing Vision Transformers.
 Install the package by
 
 ```bash
-pip install git+https://gitlab.surrey.ac.uk/jw02425/vitoolkit.git
+pip install git+https://github.com/erow/vitookit.git
 ```
 
 
