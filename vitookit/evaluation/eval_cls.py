@@ -447,6 +447,15 @@ def main(args):
                         'scaler': loss_scaler.state_dict(),
                         'args': args,
                     }, output_dir / checkpoint_path)
+            else:
+                misc.save_on_master({
+                        'model': model_without_ddp.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'lr_scheduler': lr_scheduler.state_dict(),
+                        'epoch': epoch,
+                        'scaler': loss_scaler.state_dict(),
+                        'args': args,
+                    }, output_dir / "checkpoint.pth")
                 
             if wandb.run: wandb.log(log_stats)
             with (output_dir / "log.txt").open("a") as f:

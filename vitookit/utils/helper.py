@@ -175,14 +175,19 @@ def load_pretrained_weights(model, pretrained_weights,
             state_dict = torch.load(file_path, map_location='cpu')
     elif pretrained_weights.startswith('wandb:'):
         path = pretrained_weights.replace("wandb:","")
-        import wandb
-        api = wandb.Api()
-        run = api.run(path)
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            file_path = run.file("weights.pth").download(root=tmp_dir, replace=True).name # download weights to current dir         
-            print("Real checkpoint path: %s" % (file_path))
-            state_dict = torch.load(file_path, map_location='cpu')
+        model_hub = os.getenv("MODEL_HUB", "./MODEL_HUB")
+        model_path = os.path.join(model_hub, path)
+        os.makedirs(model_path, exist_ok=True)
+        if not os.path.exists(os.path.join(model_path, "weights.pth")):
+            import wandb
+            api = wandb.Api()
+            run = api.run(path)
+            file_path = run.file("weights.pth").download(root=model_path, replace=True).name # download weights to current dir         
+            print("Download checkpoint path: %s" % (file_path))
+        else:
+            file_path = os.path.join(model_path, "weights.pth")
+            print("Use cached checkpoint path: %s" % (file_path))    
+        state_dict = torch.load(file_path, map_location='cpu')
     elif os.path.isfile(pretrained_weights):
         state_dict = torch.load(pretrained_weights, map_location='cpu')
     else:

@@ -4,7 +4,9 @@ We aim to provide a tookit for evaluating and analyzing Vision Transformers.
 Install the package by
 
 ```bash
-pip install git+https://github.com/erow/vitookit.git
+git clone https://github.com/erow/vitookit.git
+pip install -e vitookit
+# pip install git+https://github.com/erow/vitookit.git
 ```
 
 
