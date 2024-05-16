@@ -28,7 +28,7 @@ from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage,Ran
 from ffcv.fields.decoders import IntDecoder, RandomResizedCropRGBImageDecoder, SimpleRGBImageDecoder, CenterCropRGBImageDecoder
 
 import torch
-import torchvision.transforms as tfms
+import torchvision.transforms.v2 as tfms
 from torchvision.transforms import functional as F
 from torch import nn
 
@@ -440,15 +440,13 @@ class ThreeAugmentation(nn.Module):
         
 
     def __call__(self, x):
-        mb = math.ceil(len(x)/3)
-        perm = torch.randperm(3)
-        for i in range(3):
-            if perm[i] == 0:
-                x[i*mb:(i+1)*mb] = self.guassian_blur(x[i*mb:(i+1)*mb])
-            elif perm[i] == 1:
-                x[i*mb:(i+1)*mb] = F.solarize(x[i*mb:(i+1)*mb], 0)
-            else:
-                x[i*mb:(i+1)*mb] = F.rgb_to_grayscale(x[i*mb:(i+1)*mb],1)
+        op_index = torch.randint(0,3,(len(x),))
+        
+        for i,op in enumerate([self.guassian_blur,
+                               lambda x: F.solarize(x,0),
+                               F.rgb_to_grayscale]):
+            tf_mask = op_index == i
+            x[tf_mask] = op(x[tf_mask])
         return x
 
     def __repr__(self) -> str:
@@ -464,7 +462,7 @@ def ThreeAugmentPipeline(img_size=224,scale=(0.08,1), color_jitter=None):
         [   RandomResizedCropRGBImageDecoder((img_size, img_size), scale=scale,),
             RandomHorizontalFlip(),]+
         # second_tfl
-        (   [RandomColorJitter(jitter_prob=1, brightness=color_jitter, contrast=color_jitter, saturation=color_jitter,)] if color_jitter else []) + 
+        (   [RandomColorJitter(jitter_prob=0.5, brightness=color_jitter, contrast=color_jitter, saturation=color_jitter,)] if color_jitter else []) + 
         # final_tfl
         [
             NormalizeImage(IMAGENET_MEAN, IMAGENET_STD, np.float32),

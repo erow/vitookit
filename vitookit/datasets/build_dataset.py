@@ -76,6 +76,7 @@ def build_dataset(args, is_train, trnsfrm=None,):
     elif args.data_set == 'INAT':
         dataset = INatDataset(args.data_location, train=is_train, year=2018,
                               transform=tfm)
+        nb_classes = dataset.nb_classes
     else:
         print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(args.data_set))
         raise NotImplementedError(args.data_set,args.data_location)
@@ -125,6 +126,7 @@ class INatDataset(ImageFolder):
                  category='name', loader=default_loader):
         self.transform = transform
         self.loader = loader
+        self.root = root
         self.target_transform = target_transform
         # assert category in ['kingdom','phylum','class','order','supercategory','family','genus','name']
         path_json = os.path.join(root, f'{"train" if train else "val"}{year}.json')
