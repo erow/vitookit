@@ -153,16 +153,25 @@ def main(args):
     
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
-    trunc_normal_(model.head.weight, std=0.01)
-    # for linear prob only
-    # hack: revise model's head with BN
-    model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
     
     # freeze all but the head
     for _, p in model.named_parameters():
         p.requires_grad = False
-    for _, p in model.head.named_parameters():
-        p.requires_grad = True 
+    # for linear prob only
+    # hack: revise model's head with BN
+    if hasattr(model, 'head'):
+        trunc_normal_(model.head.weight, std=0.01)
+        model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+        model.head.requires_grad_(True)
+    elif hasattr(model, 'fc'):
+        trunc_normal_(model.fc.weight, std=0.01)
+        model.fc = torch.nn.Sequential(torch.nn.BatchNorm1d(model.fc.in_features, affine=False, eps=1e-6), model.fc)
+        model.fc.requires_grad_(True)
+    else:
+        print("model head not found")
+    
+   
+    
 
     if args.compile:
         model = torch.compile(model)    
@@ -192,7 +201,7 @@ def main(args):
     model_without_ddp = model
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     
-    optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
+    optimizer = LARS(model_without_ddp.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
     
     loss_scaler = NativeScaler()
 
