@@ -60,12 +60,15 @@ def ValPipeline(img_size=224,ratio= 224/256):
     image_pipeline = [
             CenterCropRGBImageDecoder((img_size, img_size), ratio),
             ToTensor(), 
-            ToDevice(torch.device('cuda')),        
+            # ToDevice(torch.device('cuda')),        
             ToTorchImage(),
-            Convert(torch.float16),
+            Convert(torch.float32),
             tfms.Normalize(mean=[0.485*255, 0.456*255, 0.406*255], std=[0.229*255, 0.224*255, 0.225*255], inplace=True),
             ]
-    label_pipeline = [IntDecoder(), ToTensor(),ToDevice(torch.device('cuda')),View(-1)]
+    label_pipeline = [IntDecoder(), 
+                      ToTensor(),
+                    #   ToDevice(torch.device('cuda')),
+                      View(-1)]
     # Pipeline for each data field
     pipelines = {
         'image': image_pipeline,
