@@ -15,9 +15,7 @@ from pathlib import Path
 import submitit
 import importlib
 
-from vitookit.utils.helper import aug_parse
-
-def parse_args():
+def get_args_parser():
     # trainer_parser = trainer.get_args_parser()
     parser = argparse.ArgumentParser("Submitit for evaluation")
     parser.add_argument("--module", default="vitookit.evaluation.eval_cls", type=str, help="Module to run")
@@ -29,10 +27,8 @@ def parse_args():
     parser.add_argument("-p", "--partition", default="big", type=str, help="Partition where to submit")
     parser.add_argument('--comment', default="", type=str, help="Comment to pass to scheduler")
     parser.add_argument( "--job_dir", default='',type=str,)
-    parser.add_argument('--fast_dir',default='', help="The dictory of fast disk to load the datasets")
     
-    args, known= parser.parse_known_args()
-    return args
+    return parser
 
 
 def get_shared_folder(root) -> Path:
@@ -54,13 +50,14 @@ def get_init_file(root):
 
 
 class Trainer(object):
-    def __init__(self, args):
+    def __init__(self, args, module_args):
         self.args = args
+        self.module_args = module_args
         self.module = importlib.import_module(args.module)
         
         ## reassing args
         parser = self.module.get_args_parser()
-        module_args = aug_parse(parser)
+        module_args = parser.parse_args()
         module_args.output_dir = args.job_dir
         module_args.dist_url = args.dist_url
         self.module_args = module_args
@@ -68,21 +65,6 @@ class Trainer(object):
     def __call__(self):
         self._setup_gpu_args()
         
-        # move the dataset to fast_dir
-        fast_dir = self.args.fast_dir
-        if fast_dir:
-            import shutil
-            for key,value in self.module_args.__dict__.items():
-                if isinstance(value,str) and '.ffcv' in value:
-                    os.makedirs(fast_dir, exist_ok=True)
-                    # Copy the file
-                    if self.module_args.rank==0:
-                        new_path = shutil.copy(value, fast_dir)                    
-                        print("Copying ", value, " to ", new_path)
-                    else:
-                        new_path = os.path.join(fast_dir, os.path.basename(value))
-                        print("Waiting for rank 0 to copy ", value, " to ", new_path)
-                    self.module_args.__dict__[key] = new_path
         self.module.main(self.module_args)
 
     def checkpoint(self):
@@ -117,14 +99,17 @@ class Trainer(object):
         module_args.comment = f"Job {job_env.job_id} on {job_env.num_tasks} GPUs"
         
         import gin
-        if not gin.config_is_locked():
+        if not gin.config_is_locked() and hasattr(module_args, "cfgs") and hasattr(module_args, "gin"):
             gin.parse_config_files_and_bindings(module_args.cfgs,module_args.gin)
         print("Setting up GPU args", module_args)
         print(f"Process group: {job_env.num_tasks} tasks, rank: {job_env.global_rank}")
 
 
 def main():
-    args = parse_args()
+    parser = get_args_parser()
+    args, module_args = parser.parse_known_args()
+    print("args:", args)
+    print("module_args:", module_args)
     if args.job_dir=='':
         args.job_dir = f"outputs/experiments/%j"
     args.job_dir = os.path.abspath(args.job_dir)
