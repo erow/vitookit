@@ -85,7 +85,7 @@ def get_args_parser():
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--layer_decay', type=float, default=0.75)
+    parser.add_argument('--layer_decay', type=float, default=None)
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
@@ -162,6 +162,12 @@ def get_args_parser():
                         help='')
     parser.set_defaults(pin_mem=True)
 
+    # configure
+    parser.add_argument('--cfgs', nargs='+', default=[],
+                        help='<Required> Config files *.gin.', required=False)
+    parser.add_argument('--gin', nargs='+', 
+                        help='Overrides config values. e.g. --gin "section.option=value"')
+
     # distributed training parameters
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
@@ -220,7 +226,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 def main(args):
     misc.init_distributed_mode(args)
-
+    post_args(args)
     print("args: ", args)
     print("configure: ", gin.config_str())
     import torch
@@ -401,5 +407,5 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
-    args = aug_parse(parser)
+    args = parser.parse_args()
     main(args)

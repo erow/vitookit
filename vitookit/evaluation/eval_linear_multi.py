@@ -341,8 +341,7 @@ class LinearClassifier(nn.Module):
         # linear layer
         return self.linear(x)
 
-
-if __name__ == '__main__':
+def get_args_parser():
     parser = argparse.ArgumentParser('Evaluation with linear classification on ImageNet')
     parser.add_argument('--n_last_blocks', default=4, type=int, help="""Concatenate [CLS] tokens
         for the `n` last blocks. We use `n=4` when evaluating ViT-Small and `n=1` with ViT-Base/Large.""")
@@ -376,8 +375,16 @@ if __name__ == '__main__':
     parser.add_argument('--num_labels', default=1000, type=int, help='Number of labels for linear classifier')
     parser.add_argument('--load_from', default=None, help='Path to load checkpoints to resume training')
     parser.add_argument('--sweep_lr_only', default=True, type=bool, help='Wether or not to only sweep over learning rate')
-    
-    args = aug_parse(parser)
+
+    # configure
+    parser.add_argument('--cfgs', nargs='+', default=[],
+                        help='<Required> Config files *.gin.', required=False)
+    parser.add_argument('--gin', nargs='+', 
+                        help='Overrides config values. e.g. --gin "section.option=value"')
+    return parser
+if __name__ == '__main__':
+    parser = get_args_parser()
+    args = parser.parse_args()
     for checkpoint_key in args.checkpoint_key.split(','):
         print("Starting evaluating {}.".format(checkpoint_key))
         args_copy = copy.deepcopy(args)

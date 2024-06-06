@@ -50,14 +50,14 @@ def get_init_file(root):
 
 
 class Trainer(object):
-    def __init__(self, args, module_args):
+    def __init__(self, args, module_params):
         self.args = args
-        self.module_args = module_args
+        self.module_params = module_params
         self.module = importlib.import_module(args.module)
         
         ## reassing args
         parser = self.module.get_args_parser()
-        module_args = parser.parse_args()
+        module_args = parser.parse_args(module_params)
         module_args.output_dir = args.job_dir
         module_args.dist_url = args.dist_url
         self.module_args = module_args
@@ -78,7 +78,7 @@ class Trainer(object):
         
         checkpoint_file = os.path.join(output_dir, "checkpoint.pth")  
         self.args.dist_url = get_init_file(output_dir).as_uri()
-        empty_trainer = type(self)(self.args)      
+        empty_trainer = type(self)(self.args,self.module_params)
         if os.path.exists(checkpoint_file):
             empty_trainer.module_args.resume = checkpoint_file
         
@@ -98,18 +98,15 @@ class Trainer(object):
         
         module_args.comment = f"Job {job_env.job_id} on {job_env.num_tasks} GPUs"
         
-        import gin
-        if not gin.config_is_locked() and hasattr(module_args, "cfgs") and hasattr(module_args, "gin"):
-            gin.parse_config_files_and_bindings(module_args.cfgs,module_args.gin)
         print("Setting up GPU args", module_args)
         print(f"Process group: {job_env.num_tasks} tasks, rank: {job_env.global_rank}")
 
 
 def main():
     parser = get_args_parser()
-    args, module_args = parser.parse_known_args()
+    args, module_params = parser.parse_known_args()
     print("args:", args)
-    print("module_args:", module_args)
+    print("module_params:", module_params)
     if args.job_dir=='':
         args.job_dir = f"outputs/experiments/%j"
     args.job_dir = os.path.abspath(args.job_dir)
@@ -141,8 +138,8 @@ def main():
     evaluation = args.module.split(".")[-1]
     executor.update_parameters(name=evaluation)
     args.dist_url = get_init_file(args.job_dir).as_uri()
-    print("args:", args)
-    trainer = Trainer(args)
+    
+    trainer = Trainer(args, module_params)
     job = executor.submit(trainer)
     
     print("Submitted job_id:", job.job_id)

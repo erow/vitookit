@@ -157,6 +157,12 @@ def get_args_parser():
                         help='')
     parser.set_defaults(pin_mem=True)
 
+    # configure
+    parser.add_argument('--cfgs', nargs='+', default=[],
+                        help='<Required> Config files *.gin.', required=False)
+    parser.add_argument('--gin', nargs='+', 
+                        help='Overrides config values. e.g. --gin "section.option=value"')
+
     # distributed training parameters
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
@@ -256,15 +262,14 @@ def evaluate(data_loader, model, device,return_preds=False ):
 
 def main(args):
     misc.init_distributed_mode(args)
+    # fix the seed for reproducibility
+    misc.fix_random_seeds(args.seed)
+    cudnn.benchmark = True
 
     print(args)
     import torch
     device = torch.device(args.device)
-
-    # fix the seed for reproducibility
-    misc.fix_random_seeds(args.seed)
-
-    cudnn.benchmark = True
+    post_args(args)
     
     if args.ThreeAugment:
         transform = three_augmentation(args)
@@ -471,5 +476,5 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
-    args = aug_parse(parser)
+    args = parser.parse_args()
     main(args)

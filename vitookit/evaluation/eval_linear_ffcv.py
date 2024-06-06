@@ -27,7 +27,7 @@ from vitookit.models.build_model import build_model
 
 from vitookit.utils import misc
 
-from vitookit.utils.helper import aug_parse, load_pretrained_weights, log_metrics, restart_from_checkpoint
+from vitookit.utils.helper import post_args, load_pretrained_weights, log_metrics, restart_from_checkpoint
 from timm.models.layers import trunc_normal_
 
 from vitookit.utils.lars import LARS
@@ -107,6 +107,12 @@ def get_args_parser():
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
     parser.set_defaults(pin_mem=True)
 
+    # configure
+    parser.add_argument('--cfgs', nargs='+', default=[],
+                        help='<Required> Config files *.gin.', required=False)
+    parser.add_argument('--gin', nargs='+', 
+                        help='Overrides config values. e.g. --gin "section.option=value"')
+    
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
@@ -120,6 +126,7 @@ def get_args_parser():
 
 def main(args):
     misc.init_distributed_mode(args)
+    post_args(args)
     print("args: ", args)
     print("configure: ", gin.config_str())
     
@@ -455,5 +462,5 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
 
 if __name__ == '__main__':
     parser = get_args_parser()    
-    args = aug_parse(parser)
+    args = parser.parse_args()
     main(args)

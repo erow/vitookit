@@ -484,5 +484,5 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
 
 if __name__ == '__main__':
     parser = get_args_parser()    
-    args = aug_parse(parser)
+    args = parser.parse_args()
     main(args)
