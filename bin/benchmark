@@ -684,7 +684,7 @@ def main():
 
 
 def write_results(results_file, results, format='csv'):
-    with open(results_file, mode='w') as cf:
+    with open(results_file, mode='a') as cf:
         if format == 'json':
             json.dump(results, cf, indent=4)
         else:
