@@ -328,6 +328,12 @@ def main(args):
 
     
     print(f"Model  built.")
+    if args.output_dir and misc.is_main_process():
+        try:
+            wandb.init(job_type='finetune',dir=args.output_dir,resume=True, 
+                   config=args.__dict__)
+        except:
+            pass
     # load weights to evaluate
     
     model = build_model(num_classes=args.nb_classes,drop_path_rate=args.drop_path)
@@ -401,12 +407,6 @@ def main(args):
     print(f"Start training for {args.epochs} epochs from {args.start_epoch}")
     start_time = time.time()
     max_accuracy = 0.0
-    if args.output_dir and misc.is_main_process():
-        try:
-            wandb.init(job_type='finetune',dir=args.output_dir,resume=True, 
-                   config=args.__dict__)
-        except:
-            pass
         
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
