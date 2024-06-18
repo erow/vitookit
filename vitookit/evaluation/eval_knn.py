@@ -236,7 +236,7 @@ def get_parser():
     parser.add_argument('--output_dir',default='',type=str,help='path where to save, empty for no saving')
     parser.add_argument('--dis_fn',default='cosine', type=str, 
                         choices=['cosine','euclidean'])
-    
+    parser.add_argument('--use_cuda', default=False, action='store_true',)
     parser.add_argument('--bn',default=False,action='store_true', help="Apply batch normalization after extracting features. This is neccessary for MAE.")
     # configure
     parser.add_argument('--cfgs', nargs='+', default=[],
