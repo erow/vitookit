@@ -103,13 +103,10 @@ class GrayScale(object):
         else:
             return img
 
-class ThreeAugmentation(nn.Module):
-    def __init__(self,):
-        super().__init__()
     
-def three_augmentation(args = None):
-    img_size = args.input_size
-    remove_random_resized_crop = args.src
+def three_augmentation(img_size=224,color_jitter=0.4, src=False):
+    img_size = img_size
+    remove_random_resized_crop = src
     mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     primary_tfl = []
     scale=(0.08, 1.0)
@@ -132,8 +129,8 @@ def three_augmentation(args = None):
                                               Solarization(p=1.0),
                                               GaussianBlur(p=1.0)])]
    
-    if args.color_jitter is not None and not args.color_jitter==0:
-        secondary_tfl.append(transforms.ColorJitter(args.color_jitter, args.color_jitter, args.color_jitter))
+    if color_jitter is not None and not color_jitter==0:
+        secondary_tfl.append(transforms.ColorJitter(color_jitter, color_jitter, color_jitter))
     final_tfl = [
             transforms.ToTensor(),
             transforms.Normalize(

@@ -30,6 +30,8 @@ from vitookit.datasets import build_dataset
 from torchvision.transforms import *
 from vitookit.utils.helper import aug_parse, load_pretrained_weights, log_metrics, restart_from_checkpoint
 from timm.models.layers import trunc_normal_
+from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
+                         set_fast_norm)
 
 from vitookit.utils.lars import LARS
 import gin
@@ -205,7 +207,17 @@ def main(args):
     trunc_normal_(model.head.weight, std=0.01)
     # for linear prob only
     # hack: revise model's head with BN
-    model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+    if hasattr(model, 'head'):
+        trunc_normal_(model.head.weight, std=0.01)
+        model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+        model.head.requires_grad_(True)
+    elif hasattr(model, 'fc'):
+        trunc_normal_(model.fc.weight, std=0.01)
+        model.fc = torch.nn.Sequential(torch.nn.BatchNorm1d(model.fc.in_features, affine=False, eps=1e-6), model.fc)
+        model.fc.requires_grad_(True)
+    else:
+        print("model head not found")
+    model = convert_sync_batchnorm(model)
     
     # freeze all but the head
     for _, p in model.named_parameters():

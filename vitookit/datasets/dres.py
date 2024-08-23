@@ -4,6 +4,11 @@ import gin
 from .ffcv_transform import ThreeAugmentPipeline
 
 DEFAULT_SCHEMES ={
+    0: [
+        dict(res=160,lower_scale=0.08, upper_scale=1,color_jitter=False),
+        dict(res=176,lower_scale=0.08, upper_scale=1,color_jitter=False),
+        dict(res=192,lower_scale=0.08, upper_scale=1,color_jitter=True),
+    ],
     1: [
         dict(res=160,lower_scale=0.08, upper_scale=1,color_jitter=False),
         dict(res=192,lower_scale=0.08, upper_scale=1,color_jitter=False),
@@ -34,8 +39,8 @@ DEFAULT_SCHEMES ={
 
 @gin.configurable
 class DynamicResolution:
-    def __init__(self, start_ramp=gin.REQUIRED, end_ramp=gin.REQUIRED,  
-                    scheme=1):
+    def __init__(self, start_ramp=65, end_ramp=80,  
+                    scheme=0):
         if isinstance(scheme, int):
             scheme = DEFAULT_SCHEMES[scheme]
         self.scheme = scheme

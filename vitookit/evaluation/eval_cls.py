@@ -25,6 +25,8 @@ from vitookit.utils.helper import *
 from vitookit.utils import misc
 from vitookit.models.build_model import build_model
 from vitookit.datasets.build_dataset import build_dataset, build_transform
+from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
+                         set_fast_norm)
 import wandb
 
 
@@ -57,12 +59,6 @@ def get_args_parser():
         weights to evaluate. Set to `download` to automatically load the pretrained DINO from url.
         Otherwise the model is randomly initialized""")
     parser.add_argument("--checkpoint_key", default=None, type=str, help='Key to use in the checkpoint (example: "teacher")')
-    parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
-                        help='Dropout rate (default: 0.)')
-    parser.add_argument('--attn_drop_rate', type=float, default=0.0, metavar='PCT',
-                        help='Attention dropout rate (default: 0.)')
-    parser.add_argument('--drop_path', type=float, default=0.1, metavar='PCT',
-                        help='Drop path rate (default: 0.1)')
 
 
     # Optimizer parameters
@@ -148,8 +144,6 @@ def get_args_parser():
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
-    parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
-    parser.add_argument('--dist_eval', action='store_true', default=False, help='Enabling distributed evaluation')
     parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
@@ -267,9 +261,15 @@ def main(args):
     cudnn.benchmark = True
 
     print(args)
-    import torch
-    device = torch.device(args.device)
     post_args(args)
+
+    # logging system
+    if args.output_dir and misc.is_main_process():
+        try:
+            wandb.init(job_type='finetune',dir=args.output_dir,resume=True, 
+                   config=args.__dict__)
+        except:
+            pass
     
     if args.ThreeAugment:
         transform = three_augmentation(args)
@@ -288,15 +288,7 @@ def main(args):
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
-        if args.dist_eval:
-            if len(dataset_val) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_val = torch.utils.data.DistributedSampler(
-                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)
-        else:
-            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
@@ -316,7 +308,22 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False
     )
+    
+    # load weights to evaluate
+    
+    model = build_model(num_classes=args.nb_classes)
+    if args.pretrained_weights:
+        load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
+    if args.compile:
+        model = torch.compile(model)   
+        import torch._dynamo
+        torch._dynamo.config.suppress_errors = True 
+    model = convert_sync_batchnorm(model)
+    print(f"Built Model ", model)
+    train(args, model,data_loader_train, data_loader_val)
 
+def train(args,model,data_loader_train, data_loader_val):
+    device = torch.device(args.device)
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -325,26 +332,6 @@ def main(args):
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
-
-    
-    print(f"Model  built.")
-    if args.output_dir and misc.is_main_process():
-        try:
-            wandb.init(job_type='finetune',dir=args.output_dir,resume=True, 
-                   config=args.__dict__)
-        except:
-            pass
-    # load weights to evaluate
-    
-    model = build_model(num_classes=args.nb_classes,drop_path_rate=args.drop_path)
-    if args.pretrained_weights:
-        load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
-    if args.compile:
-        model = torch.compile(model)   
-        import torch._dynamo
-        torch._dynamo.config.suppress_errors = True 
-        
-    # trunc_normal_(model.head.weight, std=2e-5)
     
     model.to(device)
 
@@ -393,23 +380,13 @@ def main(args):
         # args = run_variables['args']
         args.start_epoch = run_variables["epoch"] + 1
 
-    if args.eval:
-        assert args.world_size == 1
-        test_stats, preds = evaluate(data_loader_val, model_without_ddp, device, True)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        if args.output_dir and misc.is_main_process():
-            with (output_dir / "log.txt").open("a") as f:
-                f.write(json.dumps(test_stats) + "\n")
-            with (output_dir / "preds.txt").open("w") as f:
-                f.write(json.dumps(preds.tolist()) + "\n")
-        exit(0)
-
     print(f"Start training for {args.epochs} epochs from {args.start_epoch}")
     start_time = time.time()
     max_accuracy = 0.0
         
     for epoch in range(args.start_epoch, args.epochs):
-        data_loader_train.sampler.set_epoch(epoch)
+        if hasattr(data_loader_train,'sampler'):
+            data_loader_train.sampler.set_epoch(epoch)
 
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
@@ -421,7 +398,7 @@ def main(args):
         
         if epoch%args.ckpt_freq==0 or epoch==args.epochs-1:
             test_stats = evaluate(data_loader_val, model, device)
-            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            print(f"Accuracy of the network on the test images: {test_stats['acc1']:.1f}%")
             
             if (test_stats["acc1"] >= max_accuracy):
                 # always only save best checkpoint till now

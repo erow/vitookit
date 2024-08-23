@@ -29,6 +29,8 @@ from vitookit.utils import misc
 
 from vitookit.utils.helper import post_args, load_pretrained_weights, log_metrics, restart_from_checkpoint
 from timm.models.layers import trunc_normal_
+from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
+                         set_fast_norm)
 
 from vitookit.utils.lars import LARS
 from vitookit.datasets.ffcv_transform import SimplePipeline, ValPipeline
@@ -177,7 +179,7 @@ def main(args):
     else:
         print("model head not found")
     
-   
+    model = convert_sync_batchnorm(model)
     
 
     if args.compile:
