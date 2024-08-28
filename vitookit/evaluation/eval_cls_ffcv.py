@@ -60,13 +60,13 @@ def main(args):
 
     
     model = build_model(num_classes=args.nb_classes)
-    if args.pretrained_weights:
-        load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
+    model = convert_sync_batchnorm(model)
     if args.compile:
         model = torch.compile(model)   
         import torch._dynamo
         torch._dynamo.config.suppress_errors = True 
-    model = convert_sync_batchnorm(model)
+    if args.pretrained_weights:
+        load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
     print(f"Built Model ", model)
     train(args, model,data_loader_train, data_loader_val)
 

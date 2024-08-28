@@ -24,6 +24,7 @@ from vitookit.datasets.transform import three_augmentation
 from vitookit.utils.helper import *
 from vitookit.utils import misc
 from vitookit.models.build_model import build_model
+from vitookit.datasets.dres import DynamicResolution
 from vitookit.datasets.build_dataset import build_dataset, build_transform
 from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
                          set_fast_norm)
@@ -49,6 +50,7 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--ckpt_freq', default=5, type=int)
+    parser.add_argument("--dynamic_resolution", default=False, action="store_true", help="Use dynamic resolution.")
 
     # Model parameters
     parser.add_argument("--compile", action='store_true', default=False, help="compile model with PyTorch 2.0")
@@ -312,17 +314,20 @@ def main(args):
     # load weights to evaluate
     
     model = build_model(num_classes=args.nb_classes)
+
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
+    print(f"Built Model ", model)
+    train(args, model,data_loader_train, data_loader_val)
+
+def train(args,model,data_loader_train, data_loader_val):
+
     if args.compile:
         model = torch.compile(model)   
         import torch._dynamo
         torch._dynamo.config.suppress_errors = True 
     model = convert_sync_batchnorm(model)
-    print(f"Built Model ", model)
-    train(args, model,data_loader_train, data_loader_val)
-
-def train(args,model,data_loader_train, data_loader_val):
+    import torch
     device = torch.device(args.device)
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
@@ -381,12 +386,21 @@ def train(args,model,data_loader_train, data_loader_val):
         args.start_epoch = run_variables["epoch"] + 1
 
     print(f"Start training for {args.epochs} epochs from {args.start_epoch}")
+    if args.dynamic_resolution:
+        dres = DynamicResolution()    
+    else:
+        dres = None
     start_time = time.time()
     max_accuracy = 0.0
         
     for epoch in range(args.start_epoch, args.epochs):
         if hasattr(data_loader_train,'sampler'):
+            # dataloader
             data_loader_train.sampler.set_epoch(epoch)
+            if dres: dres(data_loader_train,epoch,False)
+        else:
+            # ffcv
+            if dres: dres(data_loader_train,epoch,True)
 
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,

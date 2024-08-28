@@ -1,6 +1,6 @@
 grad-cam
 mmcv>=1.7.1
-timm==0.9.5
+timm==1.0.9
 torch>=1.7.1
 torchvision>=0.8.2
 tqdm

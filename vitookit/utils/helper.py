@@ -145,6 +145,22 @@ def interpolate_pos_embed(model, model_checkpoint):
             new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
             model_checkpoint['pos_embed'] = new_pos_embed
 
+def wandb_download(path):
+    path = path.replace("wandb:","")
+    model_hub = os.getenv("MODEL_HUB", "./MODEL_HUB")
+    model_path = os.path.join(model_hub, path)
+    os.makedirs(model_path, exist_ok=True)
+    basename = os.path.basename(model_path)
+    if not os.path.exists(model_path):
+        import wandb
+        api = wandb.Api()
+        run = api.run(path)
+        file_path = run.file(basename).download(root=model_path, replace=True).name # download weights to current dir         
+        print("Download checkpoint path: %s" % (file_path))
+    else:
+        print("Use cached path: %s" % model_path)
+    return model_path
+
 def load_pretrained_weights(model, pretrained_weights, 
                             checkpoint_key=None, prefix=None,interpolate=True):
     """load vit weights"""
