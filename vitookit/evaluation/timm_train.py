@@ -735,6 +735,10 @@ def main():
         use_multi_epochs_loader=args.use_multi_epochs_loader,
         worker_seeding=args.worker_seeding,
     )
+    
+    if utils.is_primary(args):
+        _logger.info(
+                f"Using transformation: {dataset_train.transform}")
 
     loader_eval = None
     if args.val_split:

@@ -7,7 +7,7 @@ import os
 
 def get_parser():
     parser = argparse.ArgumentParser("Extract weights from checkpoints.")
-    parser.add_argument("ckpt",required=True, type=str,help="the path of checkpoints, matching the path, e.g., '*/checkpoint.pth.'") 
+    parser.add_argument("ckpt", type=str,help="the path of checkpoints, matching the path, e.g., '*/checkpoint.pth.'") 
     parser.add_argument("--prefix", type=str, default=None, help="the regex expression of the prefix in the weights.")
     parser.add_argument("--val", type=str, default=None, help="Validate the given string.")
     parser.add_argument("--ckpt_key", type=str, default=None, help="The path of the weights in the checkpoint.")

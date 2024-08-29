@@ -387,7 +387,7 @@ def train(args,model,data_loader_train, data_loader_val):
 
     print(f"Start training for {args.epochs} epochs from {args.start_epoch}")
     if args.dynamic_resolution:
-        dres = DynamicResolution()    
+        dres = DynamicResolution(args.epochs)  
     else:
         dres = None
     start_time = time.time()
@@ -462,7 +462,7 @@ def train(args,model,data_loader_train, data_loader_val):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
-    basename = os.path.basename(__file__)
+    basename = f"cls-{args.data_set}"
     log_metrics(basename, log_stats, args)
 
 if __name__ == '__main__':

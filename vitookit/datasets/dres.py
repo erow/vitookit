@@ -39,13 +39,13 @@ DEFAULT_SCHEMES ={
 
 @gin.configurable
 class DynamicResolution:
-    def __init__(self, start_ramp=65, end_ramp=80,  
+    def __init__(self, epochs, start_ramp=0.65, end_ramp=0.80,  
                     scheme=0):
         if isinstance(scheme, int):
             scheme = DEFAULT_SCHEMES[scheme]
         self.scheme = scheme
-        self.start_ramp = start_ramp
-        self.end_ramp = end_ramp
+        self.start_ramp = int(epochs*start_ramp)
+        self.end_ramp = int(epochs*end_ramp)
         
     
     def get_config(self, epoch):
