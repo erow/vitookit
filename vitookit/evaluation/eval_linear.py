@@ -28,7 +28,7 @@ from vitookit.utils import misc
 from vitookit.datasets import build_dataset
 
 from torchvision.transforms import *
-from vitookit.utils.helper import aug_parse, load_pretrained_weights, log_metrics, restart_from_checkpoint
+from vitookit.utils.helper import post_args, load_pretrained_weights, log_metrics, restart_from_checkpoint
 from timm.models.layers import trunc_normal_
 from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
                          set_fast_norm)
@@ -51,9 +51,6 @@ def get_args_parser():
     parser.add_argument("--compile", action='store_true', default=False, help="compile model with PyTorch 2.0")
     parser.add_argument("--checkpoint_key", default=None, type=str, help="checkpoint key to load")
     parser.add_argument("--prefix", default=None, type=str, help="prefix of the model name")
-    parser.add_argument('--head_type', default=0, choices=[0, 1 ,2], type=int,
-        help="""How to aggress global information.
-        We typically set this to 0 for models with [CLS] token (e.g., DINO), 1 for models encouraging patch semantics e.g. BEiT, 2 for combining mean pool and CLS. 2 works well for all cases. """)
 
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
@@ -109,6 +106,13 @@ def get_args_parser():
     parser.add_argument('--no_pin_mem', action='store_false', dest='pin_mem')
     parser.set_defaults(pin_mem=True)
 
+    # configure
+    parser.add_argument('--cfgs', nargs='+', default=[],
+                        help='<Required> Config files *.gin.', required=False)
+    parser.add_argument('--gin', nargs='+', 
+                        help='Overrides config values. e.g. --gin "section.option=value"')
+    
+
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
@@ -122,6 +126,8 @@ def get_args_parser():
 
 def main(args):
     misc.init_distributed_mode(args)
+    post_args(args)
+    import torch
     print("args: ", args)
     print("configure: ", gin.config_str())
     
@@ -204,25 +210,26 @@ def main(args):
     model = build_model(num_classes=args.nb_classes)
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
-    trunc_normal_(model.head.weight, std=0.01)
     # for linear prob only
     # hack: revise model's head with BN
     if hasattr(model, 'head'):
         trunc_normal_(model.head.weight, std=0.01)
         model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
-        model.head.requires_grad_(True)
+        learnable_module = model.head
+        
     elif hasattr(model, 'fc'):
         trunc_normal_(model.fc.weight, std=0.01)
-        model.fc = torch.nn.Sequential(torch.nn.BatchNorm1d(model.fc.in_features, affine=False, eps=1e-6), model.fc)
-        model.fc.requires_grad_(True)
+        # model.fc = torch.nn.Sequential(torch.nn.BatchNorm1d(model.fc.in_features, affine=False, eps=1e-6), model.fc)
+        learnable_module = model.fc
     else:
         print("model head not found")
     model = convert_sync_batchnorm(model)
+    learnable_module.requires_grad_(True)
     
     # freeze all but the head
     for _, p in model.named_parameters():
         p.requires_grad = False
-    for _, p in model.head.named_parameters():
+    for _, p in learnable_module.named_parameters():
         p.requires_grad = True 
         
     if args.compile:
@@ -252,7 +259,7 @@ def main(args):
     model_without_ddp = model
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     
-    optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
+    optimizer = LARS(learnable_module.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
     
     loss_scaler = NativeScaler()
 
@@ -298,11 +305,11 @@ def main(args):
         if epoch%args.ckpt_freq==0 or epoch == args.epochs-1:
             test_stats = evaluate(data_loader_val, model, device)
             print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-            print(f'Max accuracy: {max_accuracy:.2f}%')
             log_stats.update({f'test/{k}': v for k, v in test_stats.items()})
             if max_accuracy < test_stats["acc1"]:
                 ckpt_path = output_dir / 'best_checkpoint.pth'
             max_accuracy = max(max_accuracy, test_stats["acc1"])
+            print(f'Max accuracy: {max_accuracy:.2f}%')
         else:
             test_stats={}
 
@@ -328,8 +335,8 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
-    basename = os.path.basename(__file__)
-    log_metrics(basename, log_stats, args)
+    # basename = os.path.basename(__file__)
+    # log_metrics(basename, log_stats, args)
 
 
 from timm.utils import accuracy

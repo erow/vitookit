@@ -38,4 +38,6 @@ if __name__ == "__main__":
                 state_dict = {replace_key(pattern, k):v for k,v in state_dict.items()}
                 del state_dict[None]
             file_new = file.replace(os.path.basename(file),args.name)
+            print("converting", file, "to", file_new)
+            print(state_dict.keys())
             torch.save(state_dict,file_new)

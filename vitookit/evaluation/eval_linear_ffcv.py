@@ -41,11 +41,11 @@ import gin
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE linear probing for image classification', add_help=False)
-    parser.add_argument('--batch_size', default=128, type=int,
+    parser.add_argument('--batch_size', default=256, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=90, type=int)
     parser.add_argument('--ckpt_freq', default=5, type=int)
-    parser.add_argument('--accum_iter', default=16, type=int,
+    parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
@@ -156,7 +156,7 @@ def main(args):
                    config=args.__dict__,
                    resume=True)
     else:
-        log_writer = None
+        pass
     
     model = build_model(num_classes=args.nb_classes)
     
@@ -168,18 +168,20 @@ def main(args):
         p.requires_grad = False
     # for linear prob only
     # hack: revise model's head with BN
+    model = convert_sync_batchnorm(model)
+    model.eval()
     if hasattr(model, 'head'):
         trunc_normal_(model.head.weight, std=0.01)
         model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
-        model.head.requires_grad_(True)
+        
+        learnable_module = model.head
     elif hasattr(model, 'fc'):
         trunc_normal_(model.fc.weight, std=0.01)
-        model.fc = torch.nn.Sequential(torch.nn.BatchNorm1d(model.fc.in_features, affine=False, eps=1e-6), model.fc)
-        model.fc.requires_grad_(True)
+        learnable_module = model.fc
     else:
         print("model head not found")
     
-    model = convert_sync_batchnorm(model)
+    learnable_module.requires_grad_(True)
     
 
     if args.compile:
@@ -210,7 +212,7 @@ def main(args):
     model_without_ddp = model
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     
-    optimizer = LARS(model_without_ddp.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
+    optimizer = LARS(learnable_module.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
     
     loss_scaler = NativeScaler()
 
@@ -250,17 +252,19 @@ def main(args):
     
     
     order = OrderOption.RANDOM if args.distributed else OrderOption.QUASI_RANDOM
-    data_loader_train =  Loader(args.train_path, pipelines=SimplePipeline(),
+    data_loader_train =  Loader(args.train_path, pipelines=SimplePipeline(scale=(0.08,1)),
                         batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=1,
                         order=order, distributed=args.distributed,seed=args.seed)
     
     for epoch in range(args.start_epoch, args.epochs):
         
+        model_without_ddp.fc.train(True) # WARN: disable updating running_mean and _var 
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             args=args
         )
+        model_without_ddp.fc.train(False)
         log_stats = {**{f'train/{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
                         'n_parameters': n_parameters}
@@ -310,7 +314,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = None,
                     mixup_fn = None, log_writer=None,
                     args=None):
-    model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
@@ -340,6 +343,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
+
+            error_dict = {
+                'model':model.state_dict(),
+                'samples': samples,
+                'targets':targets,
+            }
+            rank = args.gpu
+            torch.save(error_dict,os.path.join(args.output_dir,f'error-{rank}.pth'))
             sys.exit(1)
 
         loss /= accum_iter
@@ -378,8 +389,6 @@ def evaluate(data_loader, model, device):
     metric_logger = misc.MetricLogger(delimiter="  ")
     header = 'Test:'
 
-    # switch to evaluation mode
-    model.eval()
 
     for batch in metric_logger.log_every(data_loader, 10, header):
         images = batch[0].to(device, non_blocking=True)

@@ -202,6 +202,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
+
+            error_dict = {
+                'model':model.state_dict(),
+                'samples': samples,
+                'targets':targets,
+            }
+            if wandb.run:
+                
+                torch.save(error_dict,wandb.run.dir+'error.pth')
             sys.exit(1)
         # this attribute is added by timm on one optimizer (adahessian)
         # is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order

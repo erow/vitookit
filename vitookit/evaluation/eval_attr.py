@@ -26,10 +26,14 @@ import wandb
 
 
 from vitookit.datasets import rival10
+def normalize(x):
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
+    return (x-mean)/std
 class RIVAL10AttributeDataset(rival10.LocalRIVAL10):
     def __getitem__(self, i):
         out = super().__getitem__(i)
-        return out['img'], out['attr_labels']
+        return normalize(out['img']), out['attr_labels']
 
 def multilabel_loss(output, target):
     import torch.nn.functional as F

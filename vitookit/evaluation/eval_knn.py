@@ -1,16 +1,6 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
 # 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# reference: 
+
 import json
 import os
 from pathlib import Path
@@ -147,11 +137,17 @@ def extract_features(model, data_loader, use_cuda=True, multiscale=False):
 
 import tqdm
 @torch.no_grad()
-def knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean'):
+def knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean',device='cuda'):
     top1, top5, total = 0.0, 0.0, 0
     num_test_images, num_chunks = test_labels.shape[0], 100
     imgs_per_chunk = num_test_images // num_chunks
-    retrieval_one_hot = torch.zeros(k, num_classes).to(train_features.device)
+    retrieval_one_hot = torch.zeros(k, num_classes).to(device)
+    
+    train_features = train_features.to(device,non_blocking=True)
+    train_labels = train_labels.to(device,non_blocking=True)
+    test_features = test_features.to(device,non_blocking=True)
+    test_labels = test_labels.to(device,non_blocking=True)
+
     for idx in tqdm.tqdm(range(0, num_test_images, imgs_per_chunk)):
         # get the features for test images
         features = test_features[
@@ -295,8 +291,7 @@ if __name__ == '__main__':
                 test_features, test_labels, k, args.temperature,dis_fn=args.dis_fn)
             print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
             
-            log_stats = {f'{k}/acc1':top1,f'{k}/acc5':top5}
-            
+            log_stats = {f'{k}/acc1':top1,f'{k}/acc5':top5,'metric':'knn'}            
 
             if output_dir:
                 with (output_dir / "log.txt").open("a") as f:

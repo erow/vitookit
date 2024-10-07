@@ -77,6 +77,20 @@ def build_dataset(args, is_train, trnsfrm=None,):
         dataset = INatDataset(args.data_location, train=is_train, year=2018,
                               transform=tfm)
         nb_classes = dataset.nb_classes
+    elif args.data_set == 'Food':
+        split = 'train' if is_train else 'test'
+        dataset=datasets.Food101(args.data_location, split,tfm,download=True)
+        nb_classes=101
+    elif args.data_set == 'CoarseIN493':
+        coarse_map = json.load(open(os.path.join(args.data_location,"coarse_map.json")))
+        split = 'train' if is_train else 'validation'
+        dataset = datasets.ImageFolder(os.path.join(args.data_location,split), transform=tfm)        
+        coarse_labels = [coarse_map[k] for k in dataset.class_to_idx]
+        def target_transform(target):
+            return coarse_labels[target]
+        dataset.target_transform = target_transform
+        nb_classes = 31
+
     else:
         print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(args.data_set))
         raise NotImplementedError(args.data_set,args.data_location)
