@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Example:
-vitrun  --nproc_per_node=8 eval_attr.py --data_location ~/data/ --data_set rival10 --fraction 0.1  --output_dir outputs/semi
+vitrun  --nproc_per_node=8 eval_attr.py --data_location ~/data/RIVAL10/ --data_set rival10   --output_dir outputs/semi
 
 """
 from PIL import Image # hack to avoid `CXXABI_1.3.9' not found error
@@ -16,20 +16,23 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 
 
-from vitookit.datasets.ffcv_transform import *
-
 from vitookit.utils.helper import post_args, load_pretrained_weights
 from vitookit.utils import misc
 from vitookit.models.build_model import build_model
+from vitookit.datasets.build_dataset import build_transform
 from vitookit.evaluation.eval_cls import get_args_parser, NativeScaler, convert_sync_batchnorm, create_optimizer, create_scheduler, train_one_epoch,  restart_from_checkpoint, log_metrics, os, sys, json, Path
 import wandb
 
 
 from vitookit.datasets import rival10
+def normalize(x):
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
+    return (x-mean)/std
 class RIVAL10AttributeDataset(rival10.LocalRIVAL10):
     def __getitem__(self, i):
         out = super().__getitem__(i)
-        return out['img'], out['attr_labels']
+        return normalize(out['img']), out['attr_labels']
 
 def multilabel_loss(output, target):
     import torch.nn.functional as F
@@ -52,10 +55,22 @@ def main(args):
         except:
             pass
     
+    
+    transform_train = build_transform(True,args)
+    transform_val = build_transform(False,args)
+    
+    print("Transforms: ", transform_train, transform_val)
+
     if args.data_set == 'rival10':
         dataset_train = RIVAL10AttributeDataset(args.data_location, train=True)
         dataset_val = RIVAL10AttributeDataset(args.data_location, train=False)
         args.nb_classes = 18 # number of attributes
+    elif 'object_attr' in args.data_set:
+        from vitookit.datasets.imagenet_attr import ImageNetAttrKFold
+        fold = int(args.data_set.split('_')[-1])
+        dataset_train = ImageNetAttrKFold(args.data_location, fold, train=True, transform=transform_train)
+        dataset_val = ImageNetAttrKFold(args.data_location, fold, train=False, transform=transform_val)
+        args.nb_classes = 25
     else:
         raise NotImplementedError
         
@@ -280,7 +295,6 @@ def evaluate(data_loader, model, device,return_preds=False ):
         return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
-    parser.add_argument("--fraction", type=float, default=0.1, help="Fraction of the dataset to use")
+    parser = argparse.ArgumentParser('Attribute learning script', parents=[get_args_parser()])
     args = parser.parse_args()
     main(args)
