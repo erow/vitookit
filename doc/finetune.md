@@ -38,3 +38,14 @@ WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls_ffcv.py --batch_size=256  
 
 ```
 
+```bash
+name=vitb-iNat18
+WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls_ffcv.py --batch_size=128  --train_path $train_path --val_path $val_path  --ckpt_freq 5 --opt AdamW --opt_betas 0.9 .95 --lr 1e-5  --epochs 300 --weight_decay 5e-2 --smoothing=0.1 --reprob 0.1 --gin build_model.model_name="'vit_base_patch16_224'" build_model.drop_path=0.1 \
+-w <weights> --output_dir outputs/cls/${name} 
+```  
+
+```bash
+name=vitb-IN1K
+WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls_ffcv.py --batch_size=128  --train_path $train_path --val_path $val_path  --ckpt_freq 5 --opt AdamW --opt_betas 0.9 .95 --lr 1e-4  --epochs 100 --weight_decay 5e-2 --smoothing=0.1 --reprob 0.1 --gin build_model.model_name="'vit_base_patch16_224'" build_model.drop_path=0.1 \
+-w <weights> --output_dir outputs/cls/${name} 
+```

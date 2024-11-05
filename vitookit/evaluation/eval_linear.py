@@ -208,10 +208,13 @@ def main(args):
     )
     
     model = build_model(num_classes=args.nb_classes)
+    
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
     # for linear prob only
+    model = convert_sync_batchnorm(model)
     # hack: revise model's head with BN
+    model.eval()
     if hasattr(model, 'head'):
         trunc_normal_(model.head.weight, std=0.01)
         model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
@@ -223,10 +226,9 @@ def main(args):
         learnable_module = model.fc
     else:
         print("model head not found")
-    model = convert_sync_batchnorm(model)
-    learnable_module.requires_grad_(True)
     
     # freeze all but the head
+    learnable_module.requires_grad_(True)
     for _, p in model.named_parameters():
         p.requires_grad = False
     for _, p in learnable_module.named_parameters():
@@ -241,7 +243,7 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    # print("Model = %s" % str(model_without_ddp))
+    print("Model = %s" % str(learnable_module))
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
     
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
@@ -259,7 +261,9 @@ def main(args):
     model_without_ddp = model
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     
-    optimizer = LARS(learnable_module.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
+    optimizer = torch.optim.SGD(learnable_module.parameters(), 
+                     lr=args.lr, momentum=0.9,
+                     weight_decay=args.weight_decay) # LARS for large batch training
     
     loss_scaler = NativeScaler()
 
@@ -300,14 +304,12 @@ def main(args):
         log_stats = {**{f'train/{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
                         'n_parameters': n_parameters}
-        
-        ckpt_path = output_dir / 'checkpoint.pth'
-        if epoch%args.ckpt_freq==0 or epoch == args.epochs-1:
+                
+        if epoch % args.ckpt_freq==0 or epoch == args.epochs-1:
             test_stats = evaluate(data_loader_val, model, device)
             print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
             log_stats.update({f'test/{k}': v for k, v in test_stats.items()})
-            if max_accuracy < test_stats["acc1"]:
-                ckpt_path = output_dir / 'best_checkpoint.pth'
+
             max_accuracy = max(max_accuracy, test_stats["acc1"])
             print(f'Max accuracy: {max_accuracy:.2f}%')
         else:
@@ -315,6 +317,7 @@ def main(args):
 
         if args.output_dir and misc.is_main_process():
             if epoch % args.ckpt_freq == 0 or epoch == args.epochs-1:
+                ckpt_path = output_dir / 'checkpoint.pth'
                 misc.save_on_master({
                         'model': model_without_ddp.state_dict(),
                         'optimizer': optimizer.state_dict(),

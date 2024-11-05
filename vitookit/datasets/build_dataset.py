@@ -69,18 +69,22 @@ def build_dataset(args, is_train, trnsfrm=None,):
         split = 'train' if is_train else 'test'
         dataset = datasets.STL10(args.data_location,split,transform=tfm,download=True)
         nb_classes = 10
+
     elif args.data_set == 'ominiglot':
         trnsfrm.transforms.insert(-2,transforms.Grayscale(num_output_channels=3))
         dataset = datasets.Omniglot(args.data_location,transform=tfm,download=True)
         nb_classes = 1623
+
     elif args.data_set == 'INAT':
         dataset = INatDataset(args.data_location, train=is_train, year=2018,
                               transform=tfm)
         nb_classes = dataset.nb_classes
+
     elif args.data_set == 'Food':
         split = 'train' if is_train else 'test'
         dataset=datasets.Food101(args.data_location, split,tfm,download=True)
         nb_classes=101
+        
     elif args.data_set == 'CoarseIN493':
         coarse_map = json.load(open(os.path.join(args.data_location,"coarse_map.json")))
         split = 'train' if is_train else 'validation'
@@ -90,6 +94,18 @@ def build_dataset(args, is_train, trnsfrm=None,):
             return coarse_labels[target]
         dataset.target_transform = target_transform
         nb_classes = 31
+
+    elif args.data_set =="DTD":
+        split = 'train' if is_train else 'test'
+        dataset = datasets.DTD(args.data_location,split, 
+                            transform=tfm, download=True)
+        nb_classes = 47
+    
+    elif args.data_set == "SUN397":
+        split = 'train' if is_train else 'test'
+        dataset = datasets.SUN397(args.data_location, 
+                            transform=tfm, download=True)
+        nb_classes = 397
 
     else:
         print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(args.data_set))

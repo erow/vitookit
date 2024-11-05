@@ -16,6 +16,8 @@ from vitookit.datasets import build_dataset
 from vitookit.utils.helper import load_pretrained_weights, post_args
 from vitookit.models.build_model import build_model
 from vitookit.utils import misc
+from sklearn.metrics import classification_report
+import pandas as pd
 
 def extract_feature_pipeline(args):
     # ============ preparing data ... ============
@@ -137,18 +139,12 @@ def extract_features(model, data_loader, use_cuda=True, multiscale=False):
 
 import tqdm
 @torch.no_grad()
-def knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean',device='cuda'):
-    top1, top5, total = 0.0, 0.0, 0
+def _knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean'):
+    
     num_test_images, num_chunks = test_labels.shape[0], 100
     imgs_per_chunk = num_test_images // num_chunks
-    retrieval_one_hot = torch.zeros(k, num_classes).to(device)
-    
-    train_features = train_features.to(device,non_blocking=True)
-    train_labels = train_labels.to(device,non_blocking=True)
-    test_features = test_features.to(device,non_blocking=True)
-    test_labels = test_labels.to(device,non_blocking=True)
-
-    for idx in tqdm.tqdm(range(0, num_test_images, imgs_per_chunk)):
+    retrieval_one_hot = torch.zeros(k, num_classes).to(train_features.device)
+    for idx in range(0, num_test_images, imgs_per_chunk):
         # get the features for test images
         features = test_features[
             idx : min((idx + imgs_per_chunk), num_test_images), :
@@ -180,15 +176,29 @@ def knn_classifier(train_features, train_labels, test_features, test_labels, k, 
             1,
         )
         _, predictions = probs.sort(1, True)
+        yield predictions, targets
 
+
+@torch.no_grad()
+def knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean',return_predicts=False):
+    top1, top5, total = 0.0, 0.0, 0
+    num_test_images, num_chunks = test_labels.shape[0], 100
+    prediction_list, target_list = [], []
+    for predictions, targets in tqdm.tqdm(_knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes,dis_fn),total=num_chunks):
         # find the predictions that match the target
         correct = predictions.eq(targets.data.view(-1, 1))
         top1 = top1 + correct.narrow(1, 0, 1).sum().item()
         top5 = top5 + correct.narrow(1, 0, min(5, k)).sum().item()  # top5 does not make sense if k < 5
         total += targets.size(0)
+        if return_predicts:
+            prediction_list.append(predictions[:,0])
+            target_list.append(targets)
     top1 = top1 * 100.0 / total
     top5 = top5 * 100.0 / total
-    return top1, top5
+    if return_predicts:        
+        return top1, top5, torch.cat(prediction_list), torch.cat(target_list)
+    else:
+        return top1, top5
 
 
 class ReturnIndexDatasetWrap():
@@ -234,6 +244,7 @@ def get_parser():
                         choices=['cosine','euclidean'])
     parser.add_argument('--use_cuda', default=False, action='store_true',)
     parser.add_argument('--bn',default=False,action='store_true', help="Apply batch normalization after extracting features. This is neccessary for MAE.")
+    parser.add_argument('--report', default=False, action='store_true', help='Generate a report of classification results.')
     # configure
     parser.add_argument('--cfgs', nargs='+', default=[],
                         help='<Required> Config files *.gin.', required=False)
@@ -287,13 +298,24 @@ if __name__ == '__main__':
         
 
         for k in args.nb_knn:
-            top1, top5 = knn_classifier(train_features, train_labels,
-                test_features, test_labels, k, args.temperature,dis_fn=args.dis_fn)
+            if args.report:
+                top1, top5, predictions, targets = knn_classifier(train_features, train_labels,
+                    test_features, test_labels, k, args.temperature,dis_fn=args.dis_fn,return_predicts=True)                
+                
+                report_dict = classification_report(targets.cpu().numpy(), predictions.cpu().numpy(), output_dict=True)
+                report = pd.DataFrame(report_dict)
+                report['k'] = k
+                print('\n', report.round(2))
+            else:
+                top1, top5 = knn_classifier(train_features, train_labels,
+                    test_features, test_labels, k, args.temperature,dis_fn=args.dis_fn)
             print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
             
             log_stats = {f'{k}/acc1':top1,f'{k}/acc5':top5,'metric':'knn'}            
 
             if output_dir:
                 with (output_dir / "log.txt").open("a") as f:
-                    f.write(json.dumps(log_stats) + "\n")            
+                    f.write(json.dumps(log_stats) + "\n")  
+                if args.report:
+                    report.to_csv(output_dir / "report.csv",index=None,mode='a')
     dist.barrier()
