@@ -21,6 +21,7 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+import torch.optim.lbfgs
 import wandb
 from vitookit.models.build_model import build_model
 
@@ -33,13 +34,12 @@ from timm.models.layers import trunc_normal_
 from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
                          set_fast_norm)
 
-from vitookit.utils.lars import LARS
 import gin
 
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('MAE linear probing for image classification', add_help=False)
+    parser = argparse.ArgumentParser('Logic Regression via lbfgs', add_help=False)
     parser.add_argument('--batch_size', default=512, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=90, type=int)
@@ -144,8 +144,7 @@ def main(args):
     cudnn.benchmark = True
     
     train_transform = Compose([
-        RandomResizedCrop(224),
-        RandomHorizontalFlip(),
+        RandomResizedCrop(224, scale=(0.4, 1.0)),
         ToTensor(),
         Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
@@ -261,11 +260,9 @@ def main(args):
     model_without_ddp = model
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     
-    optimizer = LARS(learnable_module.parameters(), 
-                     lr=args.lr, momentum=0.9,
-                     weight_decay=args.weight_decay) # LARS for large batch training
+    optimizer = torch.optim.LBFGS(learnable_module.parameters(), 
+                     lr=args.lr,max_iter=100,) 
     
-    loss_scaler = NativeScaler()
 
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -276,7 +273,6 @@ def main(args):
         restart_from_checkpoint(args.resume,
                                 optimizer=optimizer,
                                 model=model_without_ddp,
-                                scaler=loss_scaler,
                                 run_variables=run_variables)
         # args = run_variables['args']
         args.start_epoch = run_variables["epoch"] + 1
@@ -284,131 +280,71 @@ def main(args):
 
     if args.eval:
         assert args.world_size == 1
-        test_stats = evaluate(data_loader_val, model, device)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+        log_stats = evaluate(data_loader_val, model, device)
+        print(f"Accuracy of the network on the {len(dataset_val)} test images: {log_stats['acc1']:.1f}%")
         exit(0)
-
-    print(f"Start training for {args.epochs} epochs")
+    
     start_time = time.time()
     max_accuracy = 0.0
     
     output_dir = Path(args.output_dir) if args.output_dir else None
-        
-    for epoch in range(args.start_epoch, args.epochs):
-        data_loader_train.sampler.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            model, criterion, data_loader_train,
-            optimizer, device, epoch, loss_scaler,
-            args=args
-        )
-        log_stats = {**{f'train/{k}': v for k, v in train_stats.items()},
-                        'epoch': epoch,
-                        'n_parameters': n_parameters}
-                
-        if epoch % args.ckpt_freq==0 or epoch == args.epochs-1:
-            test_stats = evaluate(data_loader_val, model, device)
-            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-            log_stats.update({f'test/{k}': v for k, v in test_stats.items()})
 
-            max_accuracy = max(max_accuracy, test_stats["acc1"])
-            print(f'Max accuracy: {max_accuracy:.2f}%')
-        else:
-            test_stats={}
-
-        if args.output_dir and misc.is_main_process():
-            if epoch % args.ckpt_freq == 0 or epoch == args.epochs-1:
-                ckpt_path = output_dir / 'checkpoint.pth'
-                misc.save_on_master({
-                        'model': model_without_ddp.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'epoch': epoch,
-                        'scaler': loss_scaler.state_dict(),
-                        'args': args,
-                    }, ckpt_path) 
-            
-            if wandb.run:
-                wandb.log(log_stats)
-                
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
-                
-            
-
+    def closure():
+        optimizer.zero_grad()        
+        for samples, targets in data_loader_train:
+            samples = samples.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+            outputs = model(samples)
+            loss = criterion(outputs, targets)            
+            loss.backward()
+            torch.cuda.synchronize()
+        log = {'train/loss':loss}        
+        if args.weight_decay>0:
+            l2_norm = 0
+            n=0
+            for p in learnable_module.parameters():
+                l2_norm += (p**2).mean()
+                n+=1
+            l2_norm/=n
+            l2_norm.backward(torch.tensor([0.5 * args.weight_decay],device=device)[0])
+            log['train/l2_norm'] = l2_norm
+        if wandb.run:
+            wandb.log(log)
+        return loss    
+    
+    for _ in range(2):
+        loss = optimizer.step(closure)
+        log_stats = evaluate(data_loader_val, model, device)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
+    log_stats = {f"test/{k}": v for k, v in log_stats.items()}
+    if args.output_dir and misc.is_main_process():
+        ckpt_path = output_dir / 'checkpoint.pth'
+        misc.save_on_master({
+                'model': model_without_ddp.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'args': args,
+            }, ckpt_path) 
+        
+        
+        log_stats['train/loss'] = loss.item()
+        print(log_stats)
+        if wandb.run:
+            wandb.log(log_stats)
+            
+        with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+            f.write(json.dumps(log_stats) + "\n")
+                
+
+   
 
     # basename = os.path.basename(__file__)
     # log_metrics(basename, log_stats, args)
 
 
 from timm.utils import accuracy
-
-def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
-                    data_loader, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, loss_scaler, max_norm: float = None,
-                    mixup_fn = None, log_writer=None,
-                    args=None):
-    model.train(True)
-    metric_logger = misc.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
-
-    accum_iter = args.accum_iter
-
-    optimizer.zero_grad()
-
-    for data_iter_step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
-
-        # we use a per iteration (instead of per epoch) lr scheduler
-        
-        if data_iter_step % accum_iter == 0:
-            adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
-
-        samples = samples.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
-
-        if mixup_fn is not None:
-            samples, targets = mixup_fn(samples, targets)
-
-        with torch.cuda.amp.autocast():
-            outputs = model(samples)
-            loss = criterion(outputs, targets)
-
-        loss_value = loss.item()
-
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
-
-        loss /= accum_iter
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=False,
-                    update_grad=(data_iter_step + 1) % accum_iter == 0)
-        if (data_iter_step + 1) % accum_iter == 0:
-            optimizer.zero_grad()
-
-        torch.cuda.synchronize()
-
-        metric_logger.update(loss=loss_value)
-        min_lr = 10.
-        max_lr = 0.
-        for group in optimizer.param_groups:
-            min_lr = min(min_lr, group["lr"])
-            max_lr = max(max_lr, group["lr"])
-
-        metric_logger.update(lr=max_lr)
-
-        if wandb.run:
-            wandb.log({'train/loss':loss,
-                       'opt/lr':max_lr})
-            
-
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 @torch.no_grad()
@@ -427,10 +363,9 @@ def evaluate(data_loader, model, device):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
 
-        # compute output
-        with torch.cuda.amp.autocast():
-            output = model(images)
-            loss = criterion(output, target)
+        # compute output    
+        output = model(images)
+        loss = criterion(output, target)
 
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
     
@@ -444,66 +379,7 @@ def evaluate(data_loader, model, device):
           .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-
     
-import math
-
-def adjust_learning_rate(optimizer, epoch, args):
-    """Decay the learning rate with half-cycle cosine after warmup"""
-    if epoch < args.warmup_epochs:
-        lr = args.lr * epoch / args.warmup_epochs 
-    else:
-        lr = args.min_lr + (args.lr - args.min_lr) * 0.5 * \
-            (1. + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs)))
-    for param_group in optimizer.param_groups:
-        if "lr_scale" in param_group:
-            param_group["lr"] = lr * param_group["lr_scale"]
-        else:
-            param_group["lr"] = lr
-    return lr
-
-class NativeScaler:
-    state_dict_key = "amp_scaler"
-
-    def __init__(self):
-        self._scaler = torch.cuda.amp.GradScaler()
-
-    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
-        self._scaler.scale(loss).backward(create_graph=create_graph)
-        if update_grad:
-            if clip_grad is not None:
-                assert parameters is not None
-                self._scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
-                norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
-            else:
-                self._scaler.unscale_(optimizer)
-                norm = get_grad_norm_(parameters)
-            self._scaler.step(optimizer)
-            self._scaler.update()
-        else:
-            norm = None
-        return norm
-
-    def state_dict(self):
-        return self._scaler.state_dict()
-
-    def load_state_dict(self, state_dict):
-        self._scaler.load_state_dict(state_dict)
-
-def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
-    if isinstance(parameters, torch.Tensor):
-        parameters = [parameters]
-    parameters = [p for p in parameters if p.grad is not None]
-    norm_type = float(norm_type)
-    if len(parameters) == 0:
-        return torch.tensor(0.)
-    device = parameters[0].grad.device
-    if norm_type == torch.inf:
-        total_norm = max(p.grad.detach().abs().max().to(device) for p in parameters)
-    else:
-        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
-    return total_norm
-
 if __name__ == '__main__':
     parser = get_args_parser()    
     args = parser.parse_args()

@@ -95,23 +95,49 @@ def build_dataset(args, is_train, trnsfrm=None,):
         dataset.target_transform = target_transform
         nb_classes = 31
 
-    elif args.data_set =="DTD":
+    elif args.data_set =='DTD':
         split = 'train' if is_train else 'test'
         dataset = datasets.DTD(args.data_location,split, 
                             transform=tfm, download=True)
         nb_classes = 47
     
-    elif args.data_set == "SUN397":
+    elif args.data_set == 'SUN397':
         split = 'train' if is_train else 'test'
         dataset = datasets.SUN397(args.data_location, 
                             transform=tfm, download=True)
         nb_classes = 397
+
+    elif args.data_set == 'CUB200':
+        from vitookit.datasets.cub2011 import Cub2011
+        dataset = Cub2011(args.data_location, is_train,
+                            transform=tfm, download=True)
+        nb_classes = 200
 
     else:
         print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(args.data_set))
         raise NotImplementedError(args.data_set,args.data_location)
         
     return dataset, nb_classes
+
+def get_supported_datasets():
+    datasets = [
+        "DTD",
+        "SUN397",
+        "CUB200",
+        "Food",
+        "Flowers",
+        "Cars",
+        "Pets",
+        "Aircraft",
+        "INAT",
+        "STL",
+        "CIFAR10",
+        "CIFAR100",
+        "ominiglot",
+        "ImageNet",
+        "Folder",
+    ]
+    return datasets
 
 def build_transform(is_train, args):
     mean = IMAGENET_DEFAULT_MEAN

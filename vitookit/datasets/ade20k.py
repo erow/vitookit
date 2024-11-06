@@ -281,5 +281,5 @@ def _get_ade20k_pairs(folder, mode='train'):
 
 
 if __name__ == '__main__':
-    train_dataset = ADE20KSegmentation(dataset_root='/user/HS502/jw02425/gent/data', mode='train')
+    train_dataset = ADE20KSegmentation(dataset_root='data', mode='train')
     print(train_dataset[0])
