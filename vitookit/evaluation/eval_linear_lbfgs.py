@@ -40,7 +40,7 @@ import gin
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Logic Regression via lbfgs', add_help=False)
-    parser.add_argument('--batch_size', default=512, type=int,
+    parser.add_argument('--batch_size', default=128, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=90, type=int)
     parser.add_argument('--ckpt_freq', default=5, type=int)
@@ -312,9 +312,9 @@ def main(args):
             wandb.log(log)
         return loss    
     
-    for _ in range(2):
-        loss = optimizer.step(closure)
-        log_stats = evaluate(data_loader_val, model, device)
+    
+    loss = optimizer.step(closure)
+    log_stats = evaluate(data_loader_val, model, device)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))

@@ -15,6 +15,7 @@ import argparse
 import datetime
 import time
 import torch
+import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 import json
 import os
@@ -238,6 +239,7 @@ def evaluate(data_loader, model, device,return_preds=False ):
     # switch to evaluation mode
     model.eval()
     preds = []
+    targets = []
     for images, target in metric_logger.log_every(data_loader, 10, header):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True, dtype=torch.long)
@@ -247,6 +249,7 @@ def evaluate(data_loader, model, device,return_preds=False ):
             output = model(images)
             loss = criterion(output, target)
         preds.append(output.argmax(1).cpu())
+        targets.append(target.cpu())
 
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
 
@@ -258,9 +261,22 @@ def evaluate(data_loader, model, device,return_preds=False ):
     metric_logger.synchronize_between_processes()
     print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
           .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
-    preds = torch.cat(preds)
+
     if return_preds:
-        return {k: meter.global_avg for k, meter in metric_logger.meters.items()},preds
+        preds = torch.cat(preds)
+        targets = torch.cat(targets)
+        
+        # Gather predictions and targets from all GPUs
+        gathered_preds = [torch.zeros_like(preds) for _ in range(dist.get_world_size())]
+        gathered_targets = [torch.zeros_like(targets) for _ in range(dist.get_world_size())]
+        dist.all_gather(gathered_preds, preds)
+        dist.all_gather(gathered_targets, targets)
+
+        gathered_preds = torch.cat(gathered_preds)
+        gathered_targets = torch.cat(gathered_targets)
+
+
+        return gathered_preds, gathered_targets
     else:
         return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -470,6 +486,15 @@ def train(args,model,data_loader_train, data_loader_val):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
+
+    preds, targets = evaluate(data_loader_val, model, device,return_preds=True)
+    from sklearn.metrics import classification_report
+    report_dict = classification_report(targets.numpy(), preds.numpy(), output_dict=True)
+    print(report_dict)
+    if output_dir:
+        with (output_dir / "report.txt").open("w") as f:
+            f.write(json.dumps(report_dict) + "\n")
 
     protocol = os.path.basename(sys.argv[0]).replace('.py', '')
     basename = f"{protocol}-{args.data_set}"
