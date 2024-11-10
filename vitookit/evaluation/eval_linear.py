@@ -284,8 +284,29 @@ def main(args):
 
     if args.eval:
         assert args.world_size == 1
-        test_stats = evaluate(data_loader_val, model, device)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+        model.to(device).eval()
+        with torch.no_grad():    
+            test_stats = evaluate(data_loader_val, model, device)
+            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+
+            preds = []
+            targets = []
+            for images, target in data_loader_val:
+                images = images.to(device, non_blocking=True)
+                target = target.to(device, non_blocking=True, dtype=torch.long)
+                output = model(images)            
+                preds.append(output.argmax(1).cpu())
+                targets.append(target.cpu())
+            
+            preds = torch.cat(preds)
+            targets = torch.cat(targets)
+
+        from sklearn.metrics import classification_report
+        report_dict = classification_report(targets.cpu().numpy(), preds.cpu().numpy(), output_dict=True)
+        print(report_dict)
+        if output_dir:
+            with (output_dir / "report.txt").open("w") as f:
+                f.write(json.dumps(report_dict) + "\n")
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")

@@ -139,10 +139,10 @@ def extract_features(model, data_loader, use_cuda=True, multiscale=False):
 
 import tqdm
 @torch.no_grad()
-def _knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean'):
-    
-    num_test_images, num_chunks = test_labels.shape[0], 100
-    imgs_per_chunk = num_test_images // num_chunks
+def _knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean'):    
+    imgs_per_chunk = 1000 
+    num_test_images = test_labels.shape[0]
+    num_chunks = num_test_images // imgs_per_chunk
     retrieval_one_hot = torch.zeros(k, num_classes).to(train_features.device)
     for idx in range(0, num_test_images, imgs_per_chunk):
         # get the features for test images
@@ -182,7 +182,9 @@ def _knn_classifier(train_features, train_labels, test_features, test_labels, k,
 @torch.no_grad()
 def knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes=1000,dis_fn='euclidean',return_predicts=False):
     top1, top5, total = 0.0, 0.0, 0
-    num_test_images, num_chunks = test_labels.shape[0], 100
+    imgs_per_chunk = 1000
+    num_test_images = test_labels.shape[0]
+    num_chunks = num_test_images // imgs_per_chunk
     prediction_list, target_list = [], []
     for predictions, targets in tqdm.tqdm(_knn_classifier(train_features, train_labels, test_features, test_labels, k, T, num_classes,dis_fn),total=num_chunks):
         # find the predictions that match the target

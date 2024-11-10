@@ -25,7 +25,7 @@ from vitookit.datasets.transform import three_augmentation
 from vitookit.utils.helper import *
 from vitookit.utils import misc
 from vitookit.models.build_model import build_model
-from vitookit.datasets.dres import DynamicResolution
+
 from vitookit.datasets.build_dataset import build_dataset, build_transform
 from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
                          set_fast_norm)
@@ -412,7 +412,8 @@ def train(args,model,data_loader_train, data_loader_val):
 
     print(f"Start training for {args.epochs} epochs from {args.start_epoch}")
     if args.dynamic_resolution:
-        dres = DynamicResolution(args.epochs)  
+        from vitookit.datasets.dres import DynamicResolution
+        dres = DynamicResolution(args.epochs)
     else:
         dres = None
     start_time = time.time()
@@ -486,15 +487,6 @@ def train(args,model,data_loader_train, data_loader_val):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-
-
-    preds, targets = evaluate(data_loader_val, model, device,return_preds=True)
-    from sklearn.metrics import classification_report
-    report_dict = classification_report(targets.numpy(), preds.numpy(), output_dict=True)
-    print(report_dict)
-    if output_dir:
-        with (output_dir / "report.txt").open("w") as f:
-            f.write(json.dumps(report_dict) + "\n")
 
     protocol = os.path.basename(sys.argv[0]).replace('.py', '')
     basename = f"{protocol}-{args.data_set}"
