@@ -383,7 +383,30 @@ def train(args,model,data_loader_train, data_loader_val):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-    optimizer = create_optimizer(args, model_without_ddp)
+    
+    if args.opt == 'muon':
+        from muon import Muon
+        # code: https://github.com/KellerJordan/Muon
+        # Muon is intended to optimize only the internal ≥2D parameters of a network. Embeddings, classifier heads, and scalar or vector parameters should be optimized using AdamW instead.
+        # Find ≥2D parameters in the body of the network -- these will be optimized by Muon
+        muon_params = []
+        adamw_params = []
+        for name, p in model.named_parameters():
+            if 'head' in name or 'fc' in name or 'embed' in name:
+                adamw_params.append(p)
+            elif p.ndim >= 2:
+                muon_params.append(p)
+            else:
+                adamw_params.append(p)
+        print(f"Muon parameters: {len(muon_params)}")
+        # Create the optimizer
+        if args.opt_betas is None:
+            args.opt_betas = (0.9, 0.95)
+        optimizer = Muon(muon_params, lr=args.lr*2, momentum=0.95,
+                        adamw_params=adamw_params, adamw_lr=args.lr, adamw_betas=args.opt_betas, adamw_wd=args.weight_decay)
+
+    else:
+        optimizer = create_optimizer(args, model_without_ddp)
     loss_scaler = NativeScaler()
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
