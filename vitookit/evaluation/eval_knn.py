@@ -22,8 +22,8 @@ import pandas as pd
 def extract_feature_pipeline(args):
     # ============ preparing data ... ============
     transform = pth_transforms.Compose([
-        pth_transforms.Resize(256, interpolation=3),
-        pth_transforms.CenterCrop(224),
+        pth_transforms.Resize(int(args.input_size*1.2), interpolation=3),
+        pth_transforms.CenterCrop(args.input_size),
         pth_transforms.ToTensor(),
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
@@ -220,6 +220,7 @@ class ReturnIndexDatasetWrap():
 
 def get_parser():
     parser = argparse.ArgumentParser('Evaluation with weighted k-NN on ImageNet')
+    parser.add_argument('--input_size', default=224, type=int, help='Input image size')
     parser.add_argument('--batch_size_per_gpu', default=128, type=int, help='Per-GPU batch-size')
     parser.add_argument('--nb_knn', default=[1, 10,20,50,100], nargs='+', type=int,
         help='Number of NN to use. 10 is usually working the best for small datasets and 20 for large datasets.')

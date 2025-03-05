@@ -4,7 +4,7 @@ import gin
 from torchvision.datasets import ImageFolder
 from torchvision import datasets, transforms
 
-from timm.data import create_transform
+import timm
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from torchvision.datasets.folder import ImageFolder, default_loader
 
@@ -32,60 +32,61 @@ def build_dataset(args, is_train, trnsfrm=None,):
     
     if 'data_path' in args.__dict__:
         args.data_location = args.data_location
-        
-    if args.data_set == 'Pets':
+    
+    data_set = args.data_set#.upper()
+    if data_set == 'Pets':
         split = 'trainval' if is_train else 'test'
         dataset = datasets.OxfordIIITPet(args.data_location, split=split, transform=tfm,download=True)
         nb_classes = 37
         
-    elif args.data_set == 'Folder':
+    elif data_set == 'Folder':
         dataset = datasets.ImageFolder(args.data_location, transform=tfm,loader=img_loader)
         nb_classes = len(dataset.classes)
-    elif args.data_set in ['IN1K','IN100']:
+    elif data_set in ['IN1K','IN100']:
         split = 'train' if is_train else 'validation'
         dataset = datasets.ImageFolder(os.path.join(args.data_location,split), transform=tfm)
         nb_classes = len(dataset.classes)
-    elif args.data_set == 'CIFAR10':
+    elif data_set == 'CIFAR10':
         dataset = datasets.CIFAR10(args.data_location,is_train,transform=tfm,download=True)
         nb_classes = 10
         
-    elif args.data_set == 'CIFAR100':
+    elif data_set == 'CIFAR100':
         dataset = datasets.CIFAR100(args.data_location,is_train,transform=tfm,download=True)
         nb_classes = 100
         
-    elif args.data_set == 'Cars':
+    elif data_set == 'Cars':
         dataset = datasets.StanfordCars(args.data_location,'train' if is_train else 'test',transform=tfm,download=True)
         nb_classes = 196
     
-    elif args.data_set == 'Flowers':
+    elif data_set == 'Flowers':
         dataset = datasets.Flowers102(args.data_location,'train' if is_train else 'test',transform=tfm,download=True)
         nb_classes = 102
     
-    elif args.data_set == 'Aircraft':
+    elif data_set == 'Aircraft':
         dataset = datasets.FGVCAircraft(args.data_location,'trainval' if is_train else 'test',transform=tfm,download=True)
         nb_classes = len(dataset.classes)
 
-    elif args.data_set == 'STL':
+    elif data_set == 'STL':
         split = 'train' if is_train else 'test'
         dataset = datasets.STL10(args.data_location,split,transform=tfm,download=True)
         nb_classes = 10
 
-    elif args.data_set == 'ominiglot':
+    elif data_set == 'ominiglot':
         trnsfrm.transforms.insert(-2,transforms.Grayscale(num_output_channels=3))
         dataset = datasets.Omniglot(args.data_location,transform=tfm,download=True)
         nb_classes = 1623
 
-    elif args.data_set == 'INAT':
+    elif data_set == 'INAT':
         dataset = INatDataset(args.data_location, train=is_train, year=2018,
                               transform=tfm)
         nb_classes = dataset.nb_classes
 
-    elif args.data_set == 'Food':
+    elif data_set == 'Food':
         split = 'train' if is_train else 'test'
         dataset=datasets.Food101(args.data_location, split,tfm,download=True)
         nb_classes=101
         
-    elif args.data_set == 'CoarseIN493':
+    elif data_set == 'CoarseIN493':
         coarse_map = json.load(open(os.path.join(args.data_location,"coarse_map.json")))
         split = 'train' if is_train else 'validation'
         dataset = datasets.ImageFolder(os.path.join(args.data_location,split), transform=tfm)        
@@ -95,29 +96,32 @@ def build_dataset(args, is_train, trnsfrm=None,):
         dataset.target_transform = target_transform
         nb_classes = 31
 
-    elif args.data_set =='DTD':
+    elif data_set =='DTD':
         split = 'train' if is_train else 'test'
         dataset = datasets.DTD(args.data_location,split, 
                             transform=tfm, download=True)
         nb_classes = 47
     
-    elif args.data_set == 'SUN397':
+    elif data_set == 'SUN397':
         split = 'train' if is_train else 'test'
         dataset = datasets.SUN397(args.data_location, 
                             transform=tfm, download=True)
         nb_classes = 397
 
-    elif args.data_set == 'CUB200':
+    elif data_set == 'CUB200':
         from vitookit.datasets.cub2011 import Cub2011
         dataset = Cub2011(args.data_location, is_train,
                             transform=tfm, download=True)
         nb_classes = 200
-
     else:
-        print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(args.data_set))
-        raise NotImplementedError(args.data_set,args.data_location)
+        print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(data_set))
+        raise NotImplementedError(data_set,args.data_location)
         
     return dataset, nb_classes
+
+@gin.configurable()
+def create_transform(**kwargs):
+    return timm.data.create_transform(**kwargs)
 
 def get_supported_datasets():
     datasets = [

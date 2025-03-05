@@ -314,12 +314,13 @@ def main(args):
     
     
     loss = optimizer.step(closure)
-    log_stats = evaluate(data_loader_val, model, device)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
+    log_stats = evaluate(data_loader_val, model, device)
     log_stats = {f"test/{k}": v for k, v in log_stats.items()}
+    print('test accuracy: ', log_stats)
     if args.output_dir and misc.is_main_process():
         ckpt_path = output_dir / 'checkpoint.pth'
         misc.save_on_master({

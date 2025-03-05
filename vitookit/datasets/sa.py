@@ -83,7 +83,7 @@ class SA1BDataset:
         # Pack instance masks into an array
         
         mask = np.stack(instance_masks, axis=2)
-        class_ids = np.array(class_ids, dtype=np.int32)
+        class_ids = np.array(class_ids, dtype=np.int3232)
         return mask, class_ids
 
 

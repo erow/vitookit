@@ -104,13 +104,15 @@ class GrayScale(object):
             return img
 
     
-def three_augmentation(img_size=224,color_jitter=0.4, src=False):
+def three_augmentation(img_size=224,color_jitter=0.4, src=False,
+                       scale=(0.08, 1.0),
+                       interpolation=transforms.InterpolationMode.BICUBIC):
     img_size = img_size
     remove_random_resized_crop = src
     mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     primary_tfl = []
-    scale=(0.08, 1.0)
-    interpolation='bicubic'
+    
+    
     if remove_random_resized_crop:
         primary_tfl = [
             transforms.Resize(img_size, interpolation=3),
@@ -120,7 +122,7 @@ def three_augmentation(img_size=224,color_jitter=0.4, src=False):
     else:
         primary_tfl = [
             transforms.RandomResizedCrop(
-                img_size, scale=scale, interpolation=transforms.InterpolationMode.BICUBIC),
+                img_size, scale=scale, interpolation=interpolation),
             transforms.RandomHorizontalFlip()
         ]
 

@@ -14,6 +14,7 @@ https://github.com/facebookresearch/deit/blob/main/main.py
 import argparse
 import datetime
 import time
+import timm
 import torch
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
@@ -78,6 +79,7 @@ def get_args_parser():
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
     parser.add_argument('--layer_decay', type=float, default=None)
+    parser.add_argument('--no_amp', action='store_true', default=False, help='Disable AMP (automatic mixed precision)')
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
@@ -104,6 +106,7 @@ def get_args_parser():
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
                         help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)'),
     parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
+    parser.add_argument('--ra', type=int, default=0, metavar='N', help="Repeated Augmentations. Use 0 for no repeated augmentations.")
 
     # * Random Erase params
     parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT',
@@ -186,14 +189,19 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        with torch.cuda.amp.autocast():
+        with torch.cuda.amp.autocast(enabled=True if loss_scaler is not None else False):
             outputs = model(samples)
             loss = criterion( outputs, targets)
         
         loss /= accum_iter
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=False,
-                    need_update=(itr + 1) % accum_iter == 0)
+        if loss_scaler is not None:
+            loss_scaler(loss, optimizer, clip_grad=max_norm,
+                        parameters=model.parameters(), create_graph=False,
+                        need_update=(itr + 1) % accum_iter == 0)
+        else:
+            loss.backward()
+            if (itr + 1) % accum_iter == 0:
+                optimizer.step()
         if (itr + 1) % accum_iter == 0:
             optimizer.zero_grad()
             
@@ -218,11 +226,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         # if model_ema is not None:
         #     model_ema.update(model)
-            
+        lr = optimizer.param_groups[-1]["lr"]
         if wandb.run: 
-            wandb.log({'train/loss':loss})
+            wandb.log({'loss':loss, 'lr':lr})
         metric_logger.update(loss=loss_value)
-        metric_logger.update(lr=optimizer.param_groups[-1]["lr"])
+        metric_logger.update(lr=lr)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -293,13 +301,13 @@ def main(args):
     # logging system
     if args.output_dir and misc.is_main_process():
         try:
-            wandb.init(job_type='finetune',dir=args.output_dir,resume=True, 
+            wandb.init(job_type='finetune',dir=args.output_dir,resume=True if args.resume else False, 
                    config=args.__dict__)
         except:
             pass
     
     if args.ThreeAugment:
-        transform = three_augmentation(args)
+        transform = three_augmentation(args.input_size, args.color_jitter, args.src)
     else:
         transform = build_transform(is_train=True, args=args)
     
@@ -312,9 +320,15 @@ def main(args):
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
+        if args.ra==0:
+            sampler_train = torch.utils.data.DistributedSampler(
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+        else:
+            sampler_train = timm.data.distributed_sampler.RepeatAugSampler(
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True,
+                num_repeats=args.ra,
+            )
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
@@ -348,6 +362,7 @@ def main(args):
 def train(args,model,data_loader_train, data_loader_val):
 
     if args.compile:
+        import torch
         model = torch.compile(model)   
         import torch._dynamo
         torch._dynamo.config.suppress_errors = True 
@@ -385,7 +400,7 @@ def train(args,model,data_loader_train, data_loader_val):
         model_without_ddp = model.module
     
     if args.opt == 'muon':
-        from muon import Muon
+        from vitookit.utils.muon import Muon
         # code: https://github.com/KellerJordan/Muon
         # Muon is intended to optimize only the internal ≥2D parameters of a network. Embeddings, classifier heads, and scalar or vector parameters should be optimized using AdamW instead.
         # Find ≥2D parameters in the body of the network -- these will be optimized by Muon
@@ -404,10 +419,16 @@ def train(args,model,data_loader_train, data_loader_val):
             args.opt_betas = (0.9, 0.95)
         optimizer = Muon(muon_params, lr=args.lr*2, momentum=0.95,
                         adamw_params=adamw_params, adamw_lr=args.lr, adamw_betas=args.opt_betas, adamw_wd=args.weight_decay)
-
+    elif args.opt == 'lion':
+        from lion_pytorch import Lion
+        optimizer = Lion(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     else:
         optimizer = create_optimizer(args, model_without_ddp)
-    loss_scaler = NativeScaler()
+    
+    if args.no_amp:
+        loss_scaler = None
+    else:
+        loss_scaler = NativeScaler()
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
@@ -489,7 +510,7 @@ def train(args,model,data_loader_train, data_loader_val):
                         'optimizer': optimizer.state_dict(),
                         'lr_scheduler': lr_scheduler.state_dict(),
                         'epoch': epoch,
-                        'scaler': loss_scaler.state_dict(),
+                        'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
                         'args': args,
                     }, output_dir / checkpoint_path)
             else:
@@ -498,7 +519,7 @@ def train(args,model,data_loader_train, data_loader_val):
                         'optimizer': optimizer.state_dict(),
                         'lr_scheduler': lr_scheduler.state_dict(),
                         'epoch': epoch,
-                        'scaler': loss_scaler.state_dict(),
+                        'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
                         'args': args,
                     }, output_dir / "checkpoint.pth")
                 
