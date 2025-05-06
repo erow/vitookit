@@ -46,6 +46,11 @@ def build_dataset(args, is_train, trnsfrm=None,):
         split = 'train' if is_train else 'validation'
         dataset = datasets.ImageFolder(os.path.join(args.data_location,split), transform=tfm)
         nb_classes = len(dataset.classes)
+    elif data_set == 'IN1Kv2':
+        dataset = datasets.ImageFolder(args.data_location, transform=tfm)
+        true_classes = dataset.classes
+        dataset.samples = [(path,int(true_classes[label])) for path,label in dataset.samples ]
+        nb_classes = len(dataset.classes)
     elif data_set == 'CIFAR10':
         dataset = datasets.CIFAR10(args.data_location,is_train,transform=tfm,download=True)
         nb_classes = 10
@@ -119,10 +124,6 @@ def build_dataset(args, is_train, trnsfrm=None,):
         
     return dataset, nb_classes
 
-@gin.configurable()
-def create_transform(**kwargs):
-    return timm.data.create_transform(**kwargs)
-
 def get_supported_datasets():
     datasets = [
         "DTD",
@@ -143,13 +144,16 @@ def get_supported_datasets():
     ]
     return datasets
 
-def build_transform(is_train, args):
-    mean = IMAGENET_DEFAULT_MEAN
-    std = IMAGENET_DEFAULT_STD
+@gin.configurable(denylist=['is_train','args'])
+def build_transform(is_train, args,
+                    mean = IMAGENET_DEFAULT_MEAN,
+                    std = IMAGENET_DEFAULT_STD,
+                    **kwargs):
+    
     # train transform
     if is_train:
         # this should always dispatch to transforms_imagenet_train
-        transform = create_transform(
+        transform = timm.data.create_transform(
             input_size=args.input_size,
             is_training=True,
             color_jitter=args.color_jitter,
@@ -160,6 +164,7 @@ def build_transform(is_train, args):
             re_count=args.recount,
             mean=mean,
             std=std,
+            **kwargs
         )
         return transform
     else:

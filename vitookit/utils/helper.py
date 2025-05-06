@@ -57,7 +57,8 @@ def unpatchify(x, p=16):
 def log_metrics(prefix, metrics: dict, args):
     if args.output_dir:
         os.makedirs(args.output_dir,exist_ok=True)
-        json.dump(dict(metrics),open(os.path.join(args.output_dir,f"{prefix}.json"),'a'))
+        with open(os.path.join(args.output_dir,f"{prefix}.json"),'a') as f:
+            f.write('\n'+json.dumps(dict(metrics)))
     if 'wandb:' in args.pretrained_weights:
         import wandb
         api = wandb.Api()
@@ -162,7 +163,7 @@ def wandb_download(path):
     return model_path
 
 def load_pretrained_weights(model, pretrained_weights, 
-                            checkpoint_key=None, prefix=None,interpolate=True):
+                            checkpoint_key=None, prefix=None,interpolate=False):
     """load vit weights"""
     if pretrained_weights == '':
         return
@@ -196,7 +197,7 @@ def load_pretrained_weights(model, pretrained_weights,
             print("Use cached checkpoint path: %s" % (file_path))    
         state_dict = torch.load(file_path, map_location='cpu')
     elif os.path.isfile(pretrained_weights):
-        state_dict = torch.load(pretrained_weights, map_location='cpu')
+        state_dict = torch.load(pretrained_weights, map_location='cpu',weights_only=False)
     else:
         raise ValueError(f'load pretrained weights from {pretrained_weights} failed!')    
     
@@ -215,6 +216,7 @@ def load_pretrained_weights(model, pretrained_weights,
         # interpolate position embedding
         pos_embed_checkpoint = state_dict['pos_embed']
         embedding_size = pos_embed_checkpoint.shape[-1]
+        print('interpolate pos_embed from {} to {}'.format(pos_embed_checkpoint.shape, model.pos_embed.shape))
         num_patches = model.patch_embed.num_patches
         num_extra_tokens = model.pos_embed.shape[-2] - num_patches
         # height (== width) for the checkpoint position embedding

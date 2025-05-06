@@ -555,8 +555,13 @@ def _try_run(
     while batch_size:
         try:
             torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            start_mem = torch.cuda.memory_allocated()
             bench = bench_fn(model_name=model_name, batch_size=batch_size, **bench_kwargs)
             results = bench.run()
+            end_mem = torch.cuda.memory_allocated()
+            results['gpu_mem_usage'] = end_mem - start_mem
+            results['compiled'] = bench.compiled
             return results
         except RuntimeError as e:
             error_str = str(e)
@@ -625,6 +630,8 @@ def benchmark(args):
         param_count = model_results.pop('infer_param_count', model_results.pop('train_param_count', 0))
         model_results.setdefault('param_count', param_count)
         model_results.pop('train_param_count', 0)
+    
+    model_results['precision'] = args.precision
     return model_results
 
 

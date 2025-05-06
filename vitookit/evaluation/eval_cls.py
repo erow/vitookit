@@ -15,6 +15,7 @@ import argparse
 import datetime
 import time
 import timm
+import timm.optim
 import torch
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
@@ -25,6 +26,7 @@ import sys
 from vitookit.datasets.transform import three_augmentation
 from vitookit.utils.helper import *
 from vitookit.utils import misc
+from vitookit.utils.layer_decay import param_groups_lrd
 from vitookit.models.build_model import build_model
 
 from vitookit.datasets.build_dataset import build_dataset, build_transform
@@ -83,7 +85,9 @@ def get_args_parser():
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
+    parser.add_argument('--lr', type=float, default=None, metavar='LR',
+                        help='learning rate (default: blr * batch_size / 256), see --blr)')
+    parser.add_argument('--blr', type=float, default=5e-4, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--lr_noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
@@ -106,7 +110,7 @@ def get_args_parser():
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
                         help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)'),
     parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
-    parser.add_argument('--ra', type=int, default=0, metavar='N', help="Repeated Augmentations. Use 0 for no repeated augmentations.")
+    parser.add_argument('--ra', type=int, default=0, metavar='N', help="Repeated Augmentations. Use 0 for no repeated augmentations.")    
 
     # * Random Erase params
     parser.add_argument('--reprob', type=float, default=0.25, metavar='PCT',
@@ -169,6 +173,22 @@ def get_args_parser():
 
     return parser
 
+class BatchAugmentation:
+    # https://openaccess.thecvf.com/content_CVPR_2020/papers/Hoffer_Augment_Your_Batch_Improving_Generalization_Through_Instance_Repetition_CVPR_2020_paper.pdf
+    def __init__(self, sampler, repeat=1):
+        self.sampler = sampler
+        self.repeat = repeat
+
+    def __len__(self):
+        return len(self.sampler)*self.repeat
+
+    def __iter__(self):
+        for index in self.sampler:
+            for _ in range(self.repeat):
+                yield index
+
+    def set_epoch(self, epoch):
+        self.sampler.set_epoch(epoch)
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -189,7 +209,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        with torch.cuda.amp.autocast(enabled=True if loss_scaler is not None else False):
+        # with torch.cuda.amp.autocast(enabled=True if loss_scaler is not None else False):
+        with torch.amp.autocast('cuda',):
             outputs = model(samples)
             loss = criterion( outputs, targets)
         
@@ -249,13 +270,13 @@ def evaluate(data_loader, model, device,return_preds=False ):
     preds = []
     targets = []
     for images, target in metric_logger.log_every(data_loader, 10, header):
-        images = images.to(device, non_blocking=True)
+        images = images.to(device, non_blocking=True, dtype=torch.float32)
         target = target.to(device, non_blocking=True, dtype=torch.long)
 
         # compute output
-        with torch.cuda.amp.autocast():
-            output = model(images)
-            loss = criterion(output, target)
+        # with torch.cuda.amp.autocast():
+        output = model(images)
+        loss = criterion(output, target)
         preds.append(output.argmax(1).cpu())
         targets.append(target.cpu())
 
@@ -320,15 +341,15 @@ def main(args):
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
-        if args.ra==0:
+        if args.ra<2:
             sampler_train = torch.utils.data.DistributedSampler(
                 dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
             )
         else:
-            sampler_train = timm.data.distributed_sampler.RepeatAugSampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True,
-                num_repeats=args.ra,
+            sampler_train = torch.utils.data.DistributedSampler(
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
             )
+            sampler_train = BatchAugmentation(sampler_train, repeat=args.ra)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
@@ -353,21 +374,18 @@ def main(args):
     # load weights to evaluate
     
     model = build_model(num_classes=args.nb_classes)
+    print(f"Built Model ", model)
 
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
-    print(f"Built Model ", model)
     train(args, model,data_loader_train, data_loader_val)
 
 def train(args,model,data_loader_train, data_loader_val):
 
-    if args.compile:
-        import torch
-        model = torch.compile(model)   
-        import torch._dynamo
-        torch._dynamo.config.suppress_errors = True 
     model = convert_sync_batchnorm(model)
-    import torch
+    model_without_ddp = model
+    import torch   
+    
     device = torch.device(args.device)
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
@@ -380,17 +398,19 @@ def train(args,model,data_loader_train, data_loader_val):
     
     model.to(device)
 
-    model_without_ddp = model
+   
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
     
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
 
-    linear_scaled_lr = args.lr * eff_batch_size / 256.0
-    
-    print("base lr: %.2e" % args.lr )
-    print("actual lr: %.2e" % linear_scaled_lr)
-    args.lr = linear_scaled_lr
+    if args.lr is None:
+        linear_scaled_lr = args.blr * eff_batch_size / 256.0
+        print("base lr: %.2e" % args.blr )
+        print("actual lr: %.2e" % linear_scaled_lr)
+        args.lr = linear_scaled_lr
+    else:
+        print("actual lr: %.2e" % args.lr)
     
     print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
@@ -398,33 +418,41 @@ def train(args,model,data_loader_train, data_loader_val):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-    
+        
     if args.opt == 'muon':
         from vitookit.utils.muon import Muon
         # code: https://github.com/KellerJordan/Muon
         # Muon is intended to optimize only the internal ≥2D parameters of a network. Embeddings, classifier heads, and scalar or vector parameters should be optimized using AdamW instead.
         # Find ≥2D parameters in the body of the network -- these will be optimized by Muon
+        
+        # todo: add layer decay
         muon_params = []
         adamw_params = []
         for name, p in model.named_parameters():
             if 'head' in name or 'fc' in name or 'embed' in name:
                 adamw_params.append(p)
-            elif p.ndim >= 2:
+            elif p.ndim == 2:
                 muon_params.append(p)
             else:
                 adamw_params.append(p)
-        print(f"Muon parameters: {len(muon_params)}")
-        # Create the optimizer
+        print(f"Muon parameters: {len(muon_params)}, AdamW parameters: {len(adamw_params)}")
         if args.opt_betas is None:
-            args.opt_betas = (0.9, 0.95)
-        optimizer = Muon(muon_params, lr=args.lr*2, momentum=0.95,
-                        adamw_params=adamw_params, adamw_lr=args.lr, adamw_betas=args.opt_betas, adamw_wd=args.weight_decay)
-    elif args.opt == 'lion':
-        from lion_pytorch import Lion
-        optimizer = Lion(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            args.opt_betas = (0.9,0.95)
+        optimizer = Muon(lr=args.lr, wd=args.weight_decay, momentum=0.95,
+                         muon_params=muon_params, adamw_params=adamw_params,
+                         adamw_betas=args.opt_betas, adamw_eps=args.opt_eps)    
+    # elif args.opt == 'adamw':
+    #     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=args.opt_betas,eps=args.opt_eps)
     else:
         optimizer = create_optimizer(args, model_without_ddp)
     
+    print('Optimizer: ', optimizer)
+
+    if args.compile:
+        model = torch.compile(model)   
+        import torch._dynamo
+        torch._dynamo.config.suppress_errors = True 
+     
     if args.no_amp:
         loss_scaler = None
     else:

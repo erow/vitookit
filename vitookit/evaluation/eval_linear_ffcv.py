@@ -146,7 +146,7 @@ def main(args):
     cudnn.benchmark = True
     
     data_loader_val =  Loader(args.val_path, pipelines=ValPipeline(),
-                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=1,
+                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=6,
                         distributed=args.distributed,seed=args.seed)
     
     global_rank = misc.get_rank()
@@ -213,7 +213,7 @@ def main(args):
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     
     optimizer = LARS(learnable_module.parameters(), lr=args.lr, weight_decay=args.weight_decay) # LARS for large batch training
-    
+    print('Optimizer:', optimizer)
     loss_scaler = NativeScaler()
 
     criterion = torch.nn.CrossEntropyLoss()
@@ -247,24 +247,22 @@ def main(args):
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    max_accuracy = 0.0
-    
-    
+    max_accuracy = 0.0    
     
     order = OrderOption.RANDOM if args.distributed else OrderOption.QUASI_RANDOM
     data_loader_train =  Loader(args.train_path, pipelines=SimplePipeline(scale=(0.08,1)),
-                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=1,
+                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=6,
                         order=order, distributed=args.distributed,seed=args.seed)
     
     for epoch in range(args.start_epoch, args.epochs):
         
-        model_without_ddp.fc.train(True) # WARN: disable updating running_mean and _var 
+        # model_without_ddp.fc.train(True) # WARN: disable updating running_mean and _var 
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             args=args
         )
-        model_without_ddp.fc.train(False)
+        # model_without_ddp.fc.train(False)
         log_stats = {**{f'train/{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,
                         'n_parameters': n_parameters}

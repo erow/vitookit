@@ -16,7 +16,7 @@ from vitookit.datasets import build_dataset
 from vitookit.utils.helper import load_pretrained_weights, post_args
 from vitookit.models.build_model import build_model
 from vitookit.utils import misc
-from sklearn.metrics import classification_report
+
 import pandas as pd
 
 def extract_feature_pipeline(args):
@@ -30,6 +30,7 @@ def extract_feature_pipeline(args):
     dataset_train = ReturnIndexDatasetWrap( build_dataset(args,True,transform)[0])
     dataset_val = ReturnIndexDatasetWrap(build_dataset(args,False,transform)[0])
     sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)
+    sampler_val = torch.utils.data.DistributedSampler(dataset_val, shuffle=False)
        
     
     data_loader_train = torch.utils.data.DataLoader(
@@ -42,6 +43,7 @@ def extract_feature_pipeline(args):
     )
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val,
+        sampler=sampler_val,
         batch_size=args.batch_size_per_gpu,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -62,9 +64,9 @@ def extract_feature_pipeline(args):
 
     # ============ extract features ... ============
     print("Extracting features for train set...")
-    train_features,train_labels = extract_features(model, data_loader_train, True)
+    train_features,train_labels = extract_features(model, data_loader_train, args.use_cuda)
     print("Extracting features for val set...")
-    test_features,test_labels = extract_features(model, data_loader_val,True)
+    test_features,test_labels = extract_features(model, data_loader_val,args.use_cuda)
     
     # save features and labels
     if args.dump_features and dist.get_rank() == 0:
@@ -245,10 +247,10 @@ def get_parser():
     parser.add_argument('--output_dir',default='',type=str,help='path where to save, empty for no saving')
     parser.add_argument('--dis_fn',default='cosine', type=str, 
                         choices=['cosine','euclidean'])
-    parser.add_argument('--use_cuda', default=False, action='store_true',)
+    parser.add_argument('--use_cuda', default=True,)
+    parser.add_argument('--no_cuda', action='store_true', help='Disables CUDA training',dest='use_cuda')
     parser.add_argument('--bn',default=False,action='store_true', help="Apply batch normalization after extracting features. This is neccessary for MAE.")
-    parser.add_argument('--report', default=False, action='store_true', help='Generate a report of classification results.')
-    # configure
+    parser.add_argument('-m','--comment', type=str, default=None, help='Comment for the run writting to the log file.')
     parser.add_argument('--cfgs', nargs='+', default=[],
                         help='<Required> Config files *.gin.', required=False)
     parser.add_argument('--gin', nargs='+', 
@@ -256,14 +258,8 @@ def get_parser():
 
     
     return parser
-if __name__ == '__main__':
-    
-    
-    parser = get_parser()
-    
-    args = parser.parse_args()
-    post_args(args)
 
+def main(args):
     misc.init_distributed_mode(args)
     print("git:\n  {}\n".format(misc.get_sha()))
     print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
@@ -301,24 +297,27 @@ if __name__ == '__main__':
         
 
         for k in args.nb_knn:
-            if args.report:
-                top1, top5, predictions, targets = knn_classifier(train_features, train_labels,
-                    test_features, test_labels, k, args.temperature,dis_fn=args.dis_fn,return_predicts=True)                
-                
-                report_dict = classification_report(targets.cpu().numpy(), predictions.cpu().numpy(), output_dict=True)
-                report = pd.DataFrame(report_dict)
-                report['k'] = k
-                print('\n', report.round(2))
-            else:
-                top1, top5 = knn_classifier(train_features, train_labels,
+            top1, top5 = knn_classifier(train_features, train_labels,
                     test_features, test_labels, k, args.temperature,dis_fn=args.dis_fn)
             print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
             
-            log_stats = {f'{k}/acc1':top1,f'{k}/acc5':top5,'metric':'knn'}            
+            log_stats = {f'{k}/acc1':top1,f'{k}/acc5':top5,'metric':'knn'}
+            if args.comment:
+                log_stats['comment'] = args.comment            
 
             if output_dir:
                 with (output_dir / "log.txt").open("a") as f:
                     f.write(json.dumps(log_stats) + "\n")  
-                if args.report:
-                    report.to_csv(output_dir / "report.csv",index=None,mode='a')
     dist.barrier()
+    if misc.get_rank() == 0:
+        return log_stats
+    else:
+        return None
+if __name__ == '__main__':
+    
+    
+    parser = get_parser()
+    
+    args = parser.parse_args()
+    post_args(args)
+    main(args)
