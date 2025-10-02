@@ -37,7 +37,7 @@ def eval_linear(args):
     misc.fix_random_seeds(args.seed)
     
     # ============ preparing data ... ============
-    if args.arch == 'dalle_encoder':
+    if args.model == 'dalle_encoder':
         train_transform = pth_transforms.Compose([
             pth_transforms.RandomResizedCrop(112),
             pth_transforms.RandomHorizontalFlip(),
@@ -82,11 +82,11 @@ def eval_linear(args):
     print(f"Data loaded with {len(dataset_train)} train and {len(dataset_val)} val imgs.")
 
     # ============ building network ... ============
-    model = build_model(num_classes=args.nb_classes,drop_path_rate=args.drop_path,)
+    model = build_model(args.model, num_classes=args.nb_classes,drop_path_rate=args.drop_path,)
     model.cuda()
-    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
+    print(f"Model {args.model} {args.patch_size}x{args.patch_size} built.")
     # load weights to evaluate
-    misc.load_pretrained_weights(model, args.pretrained_weights, args.checkpoint_key, args.arch, args.patch_size)
+    misc.load_pretrained_weights(model, args.pretrained_weights, args.checkpoint_key, args.model, args.patch_size)
 
     args.lrs = [base*n for base in  [10**k for k in range(-4, 1)] for n in range(1, 10)]
     if not args.sweep_lr_only:
@@ -96,7 +96,7 @@ def eval_linear(args):
         args.wds = [0]
         args.optims = ['sgd']
     args.permutes = list(itertools.product(args.lrs, args.wds, args.optims))
-    if 'swin' in args.arch:
+    if 'swin' in args.model:
         num_features = []
         for i, d in enumerate(model.depths):
             num_features += [int(model.embed_dim * 2 ** i)] * d
@@ -349,7 +349,7 @@ def get_args_parser():
         help="""Whether or not to use global average pooled features or the [CLS] token.
         We typically set this to 1 for BEiT and 0 for models with [CLS] token (e.g., DINO, iBOT).
         we set this to 2 for base/large-size models with [CLS] token when doing linear classification.""")
-    parser.add_argument('--arch', default='vit_small', type=str, choices=['vit_tiny', 'vit_small', 'vit_base', 
+    parser.add_argument('--model', default='vit_small', type=str, choices=['vit_tiny', 'vit_small', 'vit_base', 
         'vit_large', 'swin_tiny','swin_small', 'swin_base', 'swin_large', 'resnet50', 'resnet101', 'dalle_encoder'], help='Architecture.')
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument('--window_size', default=7, type=int, help='Window size of the model.')

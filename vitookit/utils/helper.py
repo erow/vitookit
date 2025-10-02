@@ -106,7 +106,7 @@ def restart_from_checkpoint(ckp_path, run_variables=None, **kwargs):
         checkpoint = torch.hub.load_state_dict_from_url(
             ckp_path, map_location='cpu', check_hash=True)
     else:
-        checkpoint = torch.load(ckp_path, map_location='cpu')
+        checkpoint = torch.load(ckp_path, map_location='cpu',weights_only=False)
         
     for key, value in kwargs.items():
         if key in checkpoint and value is not None:

@@ -21,7 +21,6 @@ class ImageFolderInstance(ImageFolder):
         return img, target, index
     
 
-
 @gin.configurable()
 def build_dataset(args, is_train, trnsfrm=None,):
 
@@ -38,10 +37,17 @@ def build_dataset(args, is_train, trnsfrm=None,):
         split = 'trainval' if is_train else 'test'
         dataset = datasets.OxfordIIITPet(args.data_location, split=split, transform=tfm,download=True)
         nb_classes = 37
-        
     elif data_set == 'Folder':
         dataset = datasets.ImageFolder(args.data_location, transform=tfm,loader=img_loader)
         nb_classes = len(dataset.classes)
+    elif data_set == 'DA': # domestic animals
+        split = 'train' if is_train else 'validation'
+        dataset = datasets.ImageFolder(os.path.join(args.data_location,split), transform=tfm,loader=img_loader)
+        wnids = ['n02091635', 'n02098286', 'n02112350', 'n02110806', 'n02095889'] + ['n02123159', 'n02123394', 'n02124075', 'n02123045', 'n02123597']
+        indices = [dataset.classes.index(label) for label in wnids]
+        dataset.samples = [(path,indices.index(label)) for path,label in dataset.samples if label in indices]
+        dataset.classes = wnids
+        nb_classes = 10
     elif data_set in ['IN1K','IN100']:
         split = 'train' if is_train else 'validation'
         dataset = datasets.ImageFolder(os.path.join(args.data_location,split), transform=tfm)
@@ -118,6 +124,11 @@ def build_dataset(args, is_train, trnsfrm=None,):
         dataset = Cub2011(args.data_location, is_train,
                             transform=tfm, download=True)
         nb_classes = 200
+        
+    elif data_set == 'MNIST':
+        dataset = datasets.MNIST(args.data_location, is_train, transform=tfm, download=True)
+        nb_classes = 10
+        
     else:
         print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(data_set))
         raise NotImplementedError(data_set,args.data_location)

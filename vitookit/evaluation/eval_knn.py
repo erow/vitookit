@@ -53,7 +53,7 @@ def extract_feature_pipeline(args):
 
     # ============ building network ... ============
     
-    model = build_model(num_classes=0)
+    model = build_model(args.model, num_classes=0)
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
         
@@ -230,7 +230,7 @@ def get_parser():
         help='Temperature used in the voting coefficient')
     parser.add_argument('-w', '--pretrained_weights', default='', type=str, help="Path to pretrained weights to evaluate.")
     parser.add_argument("--prefix", default=None, type=str, help="prefix of the model name")
-    parser.add_argument('--arch', default='vit_small', type=str, help='Architecture')
+    parser.add_argument('--model', default='vit_small_patch16_224', type=str, help='Architecture')
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument("--checkpoint_key", default=None, type=str,
         help='Key to use in the checkpoint (example: "teacher")')

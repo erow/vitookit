@@ -105,7 +105,7 @@ def main(args):
     
     # load weights to evaluate
     
-    model = build_model(num_classes=args.nb_classes)
+    model = build_model(args.model, num_classes=args.nb_classes)
 
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)

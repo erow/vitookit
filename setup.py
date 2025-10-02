@@ -26,5 +26,10 @@ setup(
         'wandb',
         'gin-config',
         'einops',
+        'pandas',
+        'scipy',
+        'numpy',
+        'matplotlib',
+        'seaborn',
     ]
 )

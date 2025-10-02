@@ -57,6 +57,7 @@ def get_args_parser():
     parser.add_argument("--dynamic_resolution", default=False, action="store_true", help="Use dynamic resolution.")
 
     # Model parameters
+    parser.add_argument("--model", default='vit_base_patch16_224', type=str, help="model name")
     parser.add_argument("--compile", action='store_true', default=False, help="compile model with PyTorch 2.0")
     parser.add_argument("--prefix", default=None, type=str, help="prefix of the model name")
     
@@ -373,7 +374,7 @@ def main(args):
     
     # load weights to evaluate
     
-    model = build_model(num_classes=args.nb_classes)
+    model = build_model(args.model, num_classes=args.nb_classes)
     print(f"Built Model ", model)
 
     if args.pretrained_weights:

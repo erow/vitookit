@@ -41,6 +41,7 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
+    parser.add_argument("--model", default='vit_base_patch16_224', type=str, help="model name")
     parser.add_argument("--compile", action='store_true', default=False, help="compile model with PyTorch 2.0")
     parser.add_argument("--checkpoint_key", default=None, type=str, help="checkpoint key to load")
     parser.add_argument("--prefix", default=None, type=str, help="prefix of the model name")
@@ -200,7 +201,7 @@ def main(args):
         drop_last=False
     )
     
-    model = build_model(num_classes=args.nb_classes)
+    model = build_model(args.model, num_classes=args.nb_classes)
     
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
