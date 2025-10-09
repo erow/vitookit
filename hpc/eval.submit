@@ -1,0 +1,70 @@
+####################
+#
+# Example Job for HTCondor
+#
+####################
+
+#---------------------------------------------
+# Name your batch so it's easy to distinguish in the q.
+JobBatchName = "Eval $(model_name)"
+getenv = WANDB*
+max_transfer_input_mb = -1
+max_retries = 1
+# --------------------------------------------
+# Executable
+requirements = HasStornext  && (CUDAClockMhz>1530) 
+# cogvis3.eps.surrey.ac.uk
+# -----------------------------------
+# File Transfer, Input, Output
+should_transfer_files = YES
+# preserve_relative_paths = true
+# transfer_input_files = $(PWD)/$(model_dir)/checkpoint.pth
+# transfer_output_files = outputs
+
+# ---------------------------------------------------
+# Universe (vanilla, docker)
+universe = vanilla
+# universe     = docker
+# docker_image = nvidia/cuda:10.1-cudnn7-runtime-ubuntu16.04
+
+# -------------------------------------------------
+# Event, out and error logs
+log    = outputs/condor_log/c$(cluster).$(process).log
+output = outputs/condor_log/c$(cluster).$(process).out
+error  = outputs/condor_log/c$(cluster).$(process).error
+
+Rank = CUDAClockMhz * CUDAComputeUnits
+
+# --------------------------------------
+# Resources
+request_GPUs   = $(nproc_per_node)
+# this needs to be specified for the AI@Surrey cluster if requesting a GPU
++GPUMem          = 10000  
+request_CPUs   = 10
+request_memory = 32G
+
+#This job will complete in less than 1 hour
++JobRunTime = 20
+
+#This job can checkpoint
++CanCheckpoint = false
+
+# ------------------------------------
+MaxJobRetirementTime = 1
+
+# --------------------------------------------
+# Executable
+
+PWD=$(ENV:PWD) #
+executable  = /usr/local/bin/bash
+environment = "mount=/vol/research/facer2vm_agfr/people,/vol/research/fmodel_ssl/people PYTHONPATH=$(PWD):site-packages "
+
+nproc_per_node=4
+
+
+data_location = /vol/research/fmodel_ssl/people/gent/data/revisited_paris_oxford
+
+arguments =  $(PWD)/evaluation/eval_cls.py --data_location=../data/IMNET --model vit_tiny_patch16_224 --gin build_model.global_pool='"avg"' 
+
+##################### Downstream tasks #########################
+queue 1

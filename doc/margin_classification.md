@@ -22,8 +22,7 @@ WANDB_NAME=arcface_s10 sbatch svitrun.sh eval_cls_margin.py  --ckpt_freq 2 --opt
 
 WANDB_NAME=soft_s10 sbatch svitrun.sh eval_cls_margin.py  --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 10  --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8  --margin_loss softmax  --output_dir ../outputs/margin/soft_s10
 
-
-vitrun eval_cls.py  --ckpt_freq 10 --opt muon --lr 1e-3  --warmup_epochs=10 --epochs 200  --batch_size=256  --ra=3 --weight_decay 0.05 --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location /high_perf_store3/l3_data/gent/data/torch_data/ --input_size 64 --gin "build_transform.scale=(0.8,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.model_name=\"rand_vit_tiny\" --output_dir outputs/rand_vit_tiny
+WANDB_NAME=arcgrad_vitt_e200 vitrun eval_cls_margin.py  --ckpt_freq 2 --opt muon --lr 0.001 --weight_decay 0.05  --warmup_epochs=10 --epochs 200  --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model vit_tiny_patch16_224 --gin "build_transform.scale=(0.8,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.patch_size=2 build_model.img_size=32   --margin_loss arcgrad 
 ```
 ## ArcGrad
 Angular Gradient Margin Loss (ArcGrad), which promotes intra-class compactness and inter-class separability by generating a "gradient margin". Key contributions of the paper include:

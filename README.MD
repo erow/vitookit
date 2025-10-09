@@ -11,23 +11,28 @@ pip install -e vitookit
 
 
 # Run on HPC
-See the available evaluations in [evaluation protocols](EVALUATION.md).
+## local
 
-## commands
-
+Run on a local machine:
 ```bash
-vitrun train_cls.py --data_location=../data/IMNET --gin build_model.model_name='"vit_tiny_patch16_224"' build_model.global_pool='"avg"'  -w wandb:dlib/EfficientSSL/ezuz0x4u --layer_decay=0.75 
+vitrun eval_cls.py --data_location=../data/IMNET --model vit_tiny_patch16_224 --gin build_model.global_pool='"avg"'  
 ```
 
 ## condor
-
+Submit a job to a condor cluster:
 ```bash
-condor_submit condor/eval_weka_cls.submit model_dir=outputs/dinosara/base ARCH=vit_base
+condor_submit condor/eval.submit 
 ```
 
 ## Slurm
 
-```text
+Submit a job to a slurm cluster:
+```bash
+sbatch  hpc/svitrun.sh eval_cls.py --data_location=../data/IMNET --model vit_tiny_patch16_224 --gin build_model.global_pool='"avg"'  
+```
+
+
+```bash
 
 usage: submitit for evaluation [-h] [--module MODULE] [--ngpus NGPUS] [--nodes NODES] [-t TIMEOUT] [--mem MEM] [--partition PARTITION] [--comment COMMENT] [--job_dir JOB_DIR] [--fast_dir FAST_DIR]
 
@@ -56,7 +61,7 @@ submitit  --module vitookit.evaluation.eval_cls_ffcv   --train_path  ~/data/ffcv
 
 There are many protocols for evaluating the performance of a model. We provide a set of evaluation scripts for different tasks. Use `vitrun` to launch the evaluation.
 
-**Fineune Protocol for Image Classification**
+**[Fineune](doc/finetune.md) Protocol for Image Classification**
 
 ``vitrun eval_cls.py --data_location=$data_path -w <weights.pth> --gin key=value``
 
@@ -64,11 +69,11 @@ There are many protocols for evaluating the performance of a model. We provide a
 
 ``vitrun eval_linear.py --data_location=$data_path -w <weights.pth> --gin key=value``
 
-More evaluation scripts can be found in [evaluation](evaluation/README.md).
 
 ## Flexible Configuration
 
-We use gin-config to configure the model and the training process. You can easily change the configuration by passing the gin files by `--cfgs <file1> <file2> ...` or directly change the bindings by `--gin key=value`.
+We use [gin-config]((https://github.com/google/gin-config) to configure the model. You can easily change the configuration by passing the gin files by `--cfgs <file1> <file2> ...` or directly change the bindings by `--gin key=value`.
+The training parameters are passed by commands.
 
 ## Pretrained weights
 
@@ -83,6 +88,7 @@ You can further specify the *key* and *prefix* to extract the weights from a che
 
 
 
+<!-- 
 ## cluster
 
 To see the self-attention map and the feature map of a given image, run  
@@ -94,13 +100,5 @@ Gram CAM is an important tool to diagnose model predictions. We use [pytorch-gra
 
 ```
 python bin/grad_cam.py --arch=vit_base  --method=scorecam --pretrained_weights=<> --img imgs/sample1.JPEG--output_img=<>
-```
-
-# Evaluation
-## Condor
-
-Run a group of experiments:
-
-```
-condor_submit condor/eval_stornext_cls.submit model_dir=../SiT/outputs/imagenet/sit-ViT_B head_type=0
-```
+``` 
+-->

@@ -124,6 +124,7 @@ class MarginHead(nn.Module):
             raise ValueError(f'Invalid margin loss: {margin_loss}')
     
     def get_weight(self):
+        """Get the weight of the classifier: num_classes x embed_dim"""
         return self.weight.weight_v.detach()
 
     def forward(self, input, labels=None,return_z=False):
