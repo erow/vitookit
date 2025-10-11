@@ -445,7 +445,8 @@ def train(args,model,data_loader_train, data_loader_val):
     # elif args.opt == 'adamw':
     #     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=args.opt_betas,eps=args.opt_eps)
     else:
-        optimizer = create_optimizer(args, model_without_ddp)
+        optimizer = create_optimizer(args, model_without_ddp, 
+                                     filter_bias_and_bn=not args.disable_weight_decay_on_bias_norm)
     
     print('Optimizer: ', optimizer)
 
