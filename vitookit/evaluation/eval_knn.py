@@ -58,7 +58,7 @@ def extract_feature_pipeline(args):
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
         
     
-    print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
+    print(f"Model {args.model} {args.patch_size}x{args.patch_size} built.")
     model.cuda().requires_grad_(False)
     model.eval()
 

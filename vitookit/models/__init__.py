@@ -1,1 +1,1 @@
-from vitookit.models import mvit, dmes
+from vitookit.models import mvit, dino_vit
