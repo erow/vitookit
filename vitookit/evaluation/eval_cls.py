@@ -14,8 +14,6 @@ https://github.com/facebookresearch/deit/blob/main/main.py
 import argparse
 import datetime
 import time
-import timm
-import timm.optim
 import torch
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
@@ -30,8 +28,12 @@ from vitookit.utils.layer_decay import param_groups_lrd
 from vitookit.models.build_model import build_model
 
 from vitookit.datasets.build_dataset import build_dataset, build_transform
+
+import timm
+import timm.optim
 from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
                          set_fast_norm)
+from timm.utils.model_ema import ModelEmaV3
 import wandb
 
 
@@ -58,6 +60,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument("--model", default='vit_base_patch16_224', type=str, help="model name")
+    parser.add_argument('--ema_decay', type=float, default=0.0, help='EMA decay rate')
     parser.add_argument("--compile", action='store_true', default=False, help="compile model with PyTorch 2.0")
     parser.add_argument("--prefix", default=None, type=str, help="prefix of the model name")
     
@@ -81,25 +84,38 @@ def get_args_parser():
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    parser.add_argument('--layer_decay', type=float, default=None)
+    parser.add_argument('--layer_decay', type=float, default=None,
+                        help='Layer-wise learning rate decay. Use `lr_scale` in param dict to change the learning rate for parameters.')
     parser.add_argument('--no_amp', action='store_true', default=False, help='Disable AMP (automatic mixed precision)')
+    
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
-                        help='LR scheduler (default: "cosine"')
+                        help='LR scheduler (default: "cosine"', choices=['cosine', 'step', 'plateau'])
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (default: blr * batch_size / 256), see --blr)')
     parser.add_argument('--blr', type=float, default=5e-4, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--lr_noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
+    parser.add_argument('--lr_noise_pct', type=float, default=0.67, metavar='PERCENT',
+                        help='learning rate noise limit percent (default: 0.67)')
+    parser.add_argument('--lr_noise_std', type=float, default=1.0, metavar='STDDEV',
+                        help='learning rate noise std-dev (default: 1.0)')
     
-    parser.add_argument('--min_lr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--warmup_lr', type=float, default=1e-6, metavar='LR',
+                        help='warmup learning rate (default: 1e-6)')
+    parser.add_argument('--min_lr', type=float, default=1e-5, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
-
     parser.add_argument('--warmup_epochs', type=int, default=5, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
+    parser.add_argument('--cooldown_epochs', type=int, default=10, metavar='N',
+                        help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
+    parser.add_argument('--patience_epochs', type=int, default=10, metavar='N',
+                        help='patience epochs for Plateau LR scheduler (default: 10')
     parser.add_argument('--decay_rate', '--dr', type=float, default=0.1, metavar='RATE',
                         help='LR decay rate (default: 0.1)')
+    parser.add_argument('--decay_epochs', type=int, default=30, metavar='N',
+                        help='epoch interval to decay LR (default: 30)')
 
     # Augmentation parameters
     
@@ -194,7 +210,8 @@ class BatchAugmentation:
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,lr_scheduler, max_norm: float = 0,
-                     mixup_fn: Optional[Mixup] = None, accum_iter=1
+                     mixup_fn: Optional[Mixup] = None, accum_iter=1,
+                    model_ema: Optional[torch.nn.Module] = None
                     ):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -239,14 +256,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 'targets':targets,
             }
             if wandb.run:
-                
-                torch.save(error_dict,wandb.run.dir+'error.pth')
+                torch.save(error_dict, args.output_dir+'/error.pth')
+            dist.destroy_process_group()
             sys.exit(1)
         # this attribute is added by timm on one optimizer (adahessian)
         # is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
 
-        # if model_ema is not None:
-        #     model_ema.update(model)
+        if model_ema is not None:
+            model_ema.update(model)
         lr = optimizer.param_groups[-1]["lr"]
         if wandb.run: 
             wandb.log({'loss':loss, 'lr':lr})
@@ -303,7 +320,6 @@ def evaluate(data_loader, model, device,return_preds=False ):
 
         gathered_preds = torch.cat(gathered_preds)
         gathered_targets = torch.cat(gathered_targets)
-
 
         return gathered_preds, gathered_targets
     else:
@@ -416,7 +432,8 @@ def train(args,model,data_loader_train, data_loader_val):
     print("effective batch size: %d" % eff_batch_size)
     
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu],
+                                                          find_unused_parameters=True)
         model_without_ddp = model.module
         
     if args.opt == 'muon':
@@ -440,9 +457,7 @@ def train(args,model,data_loader_train, data_loader_val):
             args.opt_betas = (0.9,0.95)
         optimizer = Muon(lr=args.lr, wd=args.weight_decay, momentum=0.95,
                          muon_params=muon_params, adamw_params=adamw_params,
-                         adamw_betas=args.opt_betas, adamw_eps=args.opt_eps)    
-    # elif args.opt == 'adamw':
-    #     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=args.opt_betas,eps=args.opt_eps)
+                         adamw_betas=args.opt_betas, adamw_eps=args.opt_eps)
     else:
         optimizer = create_optimizer(args, model_without_ddp, 
                                      filter_bias_and_bn=not args.disable_weight_decay_on_bias_norm)
@@ -491,7 +506,9 @@ def train(args,model,data_loader_train, data_loader_val):
         dres = None
     start_time = time.time()
     max_accuracy = 0.0
-        
+
+    # model ema
+    model_ema = ModelEmaV3(model, decay=args.ema_decay) if args.ema_decay>0 else None
     for epoch in range(args.start_epoch, args.epochs):
         if hasattr(data_loader_train,'sampler'):
             # dataloader
@@ -504,7 +521,7 @@ def train(args,model,data_loader_train, data_loader_val):
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,lr_scheduler,
-            args.clip_grad,  mixup_fn, accum_iter=args.accum_iter
+            args.clip_grad,  mixup_fn, accum_iter=args.accum_iter, model_ema=model_ema
         )
         
         checkpoint_paths = ['checkpoint.pth']

@@ -11,7 +11,7 @@ from torch import Tensor, nn
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 from functools import partial
 
-from timm.models.vision_transformer import register_model
+from timm.models.vision_transformer import register_model, use_fused_attn
 
 def cat_keep_shapes(x_list: List[Tensor]) -> Tuple[Tensor, List[Tuple[int]], List[int]]:
     shapes = [x.shape for x in x_list]
@@ -392,6 +392,7 @@ class SelfAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim, bias=proj_bias, device=device)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.fused_attn = use_fused_attn()
 
     def apply_rope(self, q: Tensor, k: Tensor, rope: Tensor | Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
         # All operations will use the dtype of rope, the output is cast back to the dtype of q and k
@@ -443,7 +444,15 @@ class SelfAttention(nn.Module):
         q, k, v = [t.transpose(1, 2) for t in [q, k, v]]
         if rope is not None:
             q, k = self.apply_rope(q, k, rope)
-        x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        if self.fused_attn:
+            x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        else:
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            x = attn @ v
+
         x = x.transpose(1, 2)
         return x.reshape([B, N, C])
 

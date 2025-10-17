@@ -314,15 +314,15 @@ def _create_model(variant, pretrained=False, **kwargs):
     return model
 
 @register_model
-def dems_tiny_patch2_32(patch_size=2, **kwargs):
+def dems_tiny_patch2_32(patch_size=2, img_size=32, **kwargs):
     model = _create_model("dems_tiny_patch2_32",
-        image_size=32, patch_size=patch_size, dim=192, depth=12, heads=3, mlp_ratio=[4, 4, 4],
+        image_size=img_size, patch_size=patch_size, dim=192, depth=12, heads=3, mlp_ratio=[4, 4, 4],
         qkv_bias=False, **kwargs)
     return model
 
 @register_model
-def dems_small_patch2_32(patch_size=2, **kwargs):
+def dems_small_patch2_32(patch_size=2, img_size=32, **kwargs):
     model = DEMS_ViT(
-        image_size=32, patch_size=patch_size, dim=384, depth=12, heads=6, mlp_ratio=[4, 4, 4],
+        image_size=img_size, patch_size=patch_size, dim=384, depth=12, heads=6, mlp_ratio=[4, 4, 4],
         qkv_bias=False, **kwargs)
     return model

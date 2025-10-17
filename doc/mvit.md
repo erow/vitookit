@@ -8,6 +8,7 @@
 # vit: 96.94
 WANDB_NAME=cifar_r64-vitt sbatch hpc/svitrun.sh eval_cls.py --opt adamw --lr 1e-3 --warmup_epochs=10 --epochs 200 --batch_size=256 --ra=3 --weight_decay 0.05 --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 64 --gin build_transform.scale="(0.8,1)" "build_transform.mean=(0.4914, 0.4822, 0.4465)" "build_transform.std=(0.2470, 0.2435, 0.2616)" build_model.img_size=64 build_model.patch_size=4 --model vit_tiny_patch16_224 --output_dir ../outputs/mvit/cifar64_vit_tiny
 
+# vit: 95.66
 WANDB_NAME=cifar-vitt sbatch hpc/svitrun.sh eval_cls.py --opt adamw --lr 1e-3 --warmup_epochs=10 --epochs 200 --batch_size=256 --ra=3 --weight_decay 0.05 --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --gin build_transform.scale="(0.8,1)" "build_transform.mean=(0.4914, 0.4822, 0.4465)" "build_transform.std=(0.2470, 0.2435, 0.2616)" build_model.img_size=32 build_model.patch_size=2 --model vit_tiny_patch16_224 --output_dir ../outputs/mvit/cifar_vit_tiny
 
 # dems: pretrain, official 96.03, ours: 95.8

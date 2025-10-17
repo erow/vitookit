@@ -469,10 +469,10 @@ def mvit_models(**kwargs):
     return MultiScaleVisionTransformer(**kwargs)
 
 @register_model
-def mvit2_tiny_patch2(**kwargs):
+def mvit2_tiny_patch2(img_sizes = [16, 32],patch_size=2,**kwargs):
     model = _create_mvit(
         "mvit2_tiny_patch2",
-        img_sizes = [16, 32], patch_size=2, embed_dim=192, depth=12, heads=3, mlp_ratio=4, qkv_bias=True,
+        img_sizes = img_sizes, patch_size=patch_size, embed_dim=192, depth=12, heads=3, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),block_layers=Layer_scale_init_Block, **kwargs)
     
     return model
