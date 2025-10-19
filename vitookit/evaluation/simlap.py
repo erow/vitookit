@@ -139,15 +139,15 @@ class Filter(nn.Module):
 @gin.configurable
 class SimLAP(nn.Module):
     def __init__(self,
-                 model_name='vit_base_patch16_224',
+                 backbone: nn.Module,
                  out_dim=256,
-                 embed_dim=2048,
                  mlp_dim=2048, 
                  type='arbitrary',
                  temperature=0.1,
                  sup_loss=False,
                  num_classes=1000):
         super(SimLAP, self).__init__()
+        embed_dim = backbone.embed_dim
         assert type in ['arbitrary','identical','distinct']
         self.type = type
         self.s = 1/temperature
@@ -156,7 +156,7 @@ class SimLAP(nn.Module):
         self.sup_loss = sup_loss
         
         self.embed_dim = embed_dim
-        self.backbone = create_backbone(model_name=model_name)
+        self.backbone = backbone
         self.projector = build_head(2,embed_dim,mlp_dim,out_dim, last_norm='ln')
         self.filter = Filter(num_classes=num_classes,embed_dim=out_dim)
         
@@ -516,8 +516,9 @@ def main(args):
     )
     
     # load weights to evaluate
-    model = SimLAP(num_classes=args.nb_classes, model_name=args.model)
-        
+    backbone = build_model(args.model, num_classes=0)
+    model = SimLAP(backbone, num_classes=args.nb_classes)
+
     print(f"Built Model ", model)
 
     if args.pretrained_weights:

@@ -70,16 +70,16 @@ WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls_ffcv.py --batch_size=128  
 From pretrained weights:
 ```bash
 name=MAE_base-IN1K
-WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --reprob 0.25 --mixup 0.8 --cutmix 1.  --weight_decay 0.05 --layer_decay=0.65 --smoothing=0.1 --warmup=5 --epochs=100  --gin   build_model.drop_path_rate=0.1 --output_dir outputs/cls/${name} --checkpoint_key model -w ../models/vitb/mae_pretrain_vit_base.pth 
+WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --reprob 0.25 --mixup 0.8 --cutmix 1.  --weight_decay 0.05 --layer_decay=0.65 --smoothing=0.1 --warmup_epochs=5 --epochs=100  --gin   build_model.drop_path_rate=0.1 --output_dir outputs/cls/${name} --checkpoint_key model -w ../models/vitb/mae_pretrain_vit_base.pth 
 #83.53 https://wandb.ai/erow/vitookit/runs/koswtcoj?nw=nwusererow
 
 name=MAE_base-IN1K-ffcv
-WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls_ffcv.py --batch_size=128 --train_path /high_perf_store3/l3_data/gent/data/ffcv/IN1K_train_smart.ffcv --val_path /high_perf_store3/l3_data/gent/data/ffcv/IN1K_val_smart.ffcv --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --reprob 0.25 --mixup 0.8 --cutmix 1.  --weight_decay 0.05 --layer_decay=0.65 --warmup=5 --epochs=100 --ThreeAugment --model vit_base_patch16_224 --gin build_model.drop_path_rate=0.1 --output_dir outputs/cls/MAE_base-IN1K_s4 --checkpoint_key model -w ../models/vitb/mae_pretrain_vit_base.pth 
+WANDB_NAME=${name} vitrun --nproc_per_node=8 eval_cls_ffcv.py --batch_size=128 --train_path /high_perf_store3/l3_data/gent/data/ffcv/IN1K_train_smart.ffcv --val_path /high_perf_store3/l3_data/gent/data/ffcv/IN1K_val_smart.ffcv --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --reprob 0.25 --mixup 0.8 --cutmix 1.  --weight_decay 0.05 --layer_decay=0.65 --warmup_epochs=5 --epochs=100 --ThreeAugment --model vit_base_patch16_224 --gin build_model.drop_path_rate=0.1 --output_dir outputs/cls/MAE_base-IN1K_s4 --checkpoint_key model -w ../models/vitb/mae_pretrain_vit_base.pth 
 #83.12 https://wandb.ai/erow/vitookit/runs/r464hnwc?nw=nwusererow
 
 
 name=dinov3_vits-in1k
-WANDB_NAME=${name} vitrun --nproc_per_node=8 vitookit/evaluation/eval_cls.py  --data_location $IMNET --data_set IN1K --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --smoothing=0.1 --warmup=5 --epochs=100  --model dino_vit_small --gin build_model.drop_path_rate=0.1 build_model.n_storage_tokens=4 build_model.layerscale_init=1e-4 -w ../outputs/dinov3/dinov3_vits16_pretrain_lvd1689m.pth --output_dir  ../experiments/dinov3_vits/baseline
+WANDB_NAME=${name} vitrun --nproc_per_node=8 vitookit/evaluation/eval_cls.py  --data_location $IMNET --data_set IN1K --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --smoothing=0.1 --warmup_epochs=5 --epochs=100  --model dino_vit_small --gin build_model.drop_path_rate=0.1 build_model.n_storage_tokens=4 build_model.layerscale_init=1e-4 -w ../outputs/dinov3/dinov3_vits16_pretrain_lvd1689m.pth --output_dir  ../experiments/dinov3_vits/baseline
 ```
 
 ## forgetting
@@ -87,15 +87,15 @@ WANDB_NAME=${name} vitrun --nproc_per_node=8 vitookit/evaluation/eval_cls.py  --
 ```bash
 export WANDB_TAGS="forget"
 
-WANDB_NAME=dinov2_vitb-baseline sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 1e-4  --smoothing=0.1 --warmup=5 --epochs=100  --gin build_model.pretrained=True build_model.dynamic_img_size=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-baseline
+WANDB_NAME=dinov2_vitb-baseline sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 1e-4  --smoothing=0.1 --warmup_epochs=5 --epochs=100  --gin build_model.pretrained=True build_model.dynamic_img_size=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-baseline
 
-WANDB_NAME=dinov2_vitb-baseline sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .99 --blr 5e-5 --disable_weight_decay_on_bias_norm  --smoothing=0.1 --warmup=5 --epochs=100  --gin build_model.pretrained=True build_model.dynamic_img_size=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-baseline
+WANDB_NAME=dinov2_vitb-baseline sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .99 --blr 5e-5 --disable_weight_decay_on_bias_norm  --smoothing=0.1 --warmup_epochs=5 --epochs=100  --gin build_model.pretrained=True build_model.dynamic_img_size=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-baseline
 
-WANDB_NAME=dinov2_vitb-ld0.65 sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --layer_decay=0.65  --smoothing=0.1 --warmup=5 --epochs=100  --gin build_model.pretrained=True build_model.dynamic_img_size=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-ld0.65
-
-
-WANDB_NAME=dinov2_vitb-ld0.75_dp0.1 sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4  --layer_decay=0.75 --smoothing=0.1 --warmup=5 --epochs=100  --gin  build_model.dynamic_img_size=True build_model.drop_path_rate=0.1 build_model.pretrained=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-dinov2_vitb-ld0.75_dp0.1
+WANDB_NAME=dinov2_vitb-ld0.65 sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4 --layer_decay=0.65  --smoothing=0.1 --warmup_epochs=5 --epochs=100  --gin build_model.pretrained=True build_model.dynamic_img_size=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-ld0.65
 
 
-WANDB_NAME=dinov2_vitb-ld0.9_dp0.1 sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4  --layer_decay=0.9 --smoothing=0.1 --warmup=5 --epochs=100  --gin   build_model.drop_path_rate=0.1 build_model.pretrained=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-dinov2_vitb-ld0.9_dp0.1
+WANDB_NAME=dinov2_vitb-ld0.75_dp0.1 sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4  --layer_decay=0.75 --smoothing=0.1 --warmup_epochs=5 --epochs=100  --gin  build_model.dynamic_img_size=True build_model.drop_path_rate=0.1 build_model.pretrained=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-dinov2_vitb-ld0.75_dp0.1
+
+
+WANDB_NAME=dinov2_vitb-ld0.9_dp0.1 sbatch --nodes=1 svitrun.sh vitookit/evaluation/eval_cls.py --batch_size=128 --data_location $IMNET  --ckpt_freq 5 --opt adamw --opt_betas 0.9 .999 --blr 5e-4  --layer_decay=0.9 --smoothing=0.1 --warmup_epochs=5 --epochs=100  --gin   build_model.drop_path_rate=0.1 build_model.pretrained=True --model vit_base_patch14_dinov2.lvd142m --output_dir ../experiments/ft/dinov2_vitb-dinov2_vitb-ld0.9_dp0.1
 ```

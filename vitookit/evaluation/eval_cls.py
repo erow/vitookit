@@ -13,6 +13,7 @@ https://github.com/facebookresearch/deit/blob/main/main.py
 
 import argparse
 import datetime
+import re
 import time
 import torch
 import torch.distributed as dist
@@ -72,6 +73,7 @@ def get_args_parser():
 
 
     # Optimizer parameters
+    parser.add_argument('--param', type=str, default=None, help='the training parameters.')
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
                         help='Optimizer (default: "adamw"')
     parser.add_argument('--opt_eps', default=1e-8, type=float, metavar='EPSILON',
@@ -414,6 +416,17 @@ def train(args,model,data_loader_train, data_loader_val):
     
     model.to(device)
 
+    # freeze parameters not matching the pattern
+    if not args.param is None:
+        pattern = re.compile(args.param)
+        match_params = []
+        for name, p in model.named_parameters():
+            if pattern.search(name):
+                p.requires_grad = True
+                match_params.append(name)
+            else:
+                p.requires_grad = False
+        print(f"Matched parameters to train: {match_params}")
    
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)

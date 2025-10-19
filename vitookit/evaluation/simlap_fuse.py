@@ -73,8 +73,7 @@ def similarity_gate(x1,x2,gate):
 @gin.configurable
 class SimLAPFuse(nn.Module):
     def __init__(self,
-                 model_name='resnet50',                 
-                 embed_dim=2048,
+                 backbone,     
                  type='arbitrary',
                  temperature=0.1,
                  iter_num=1,
@@ -86,8 +85,10 @@ class SimLAPFuse(nn.Module):
         self.iter_num = iter_num
         self.num_classes = num_classes        
         
+        embed_dim = backbone.embed_dim
+        backbone.head = nn.Identity()
         self.embed_dim = embed_dim
-        self.backbone = create_backbone(model_name=model_name)
+        self.backbone = backbone
         self.cls_head = MarginHead(embed_dim, num_classes, self.s,margin_loss='arcgrad')
 
     @torch.no_grad()
@@ -102,14 +103,13 @@ class SimLAPFuse(nn.Module):
     def criterion(self, samples, targets, **kwargs):
         self.log = {}
         rep = self.backbone(samples)        
-        predict = self.cls_head(rep)
+        predict, z = self.cls_head(rep, targets, return_z=True)
         sup_loss = F.cross_entropy(predict, targets)
         self.log['sup_loss'] = sup_loss.item()
 
         simlap_loss = 0
         for _ in range(self.iter_num):
             y1 = targets.clone()
-            
             if self.type == 'identical':
                 y2 = targets
             elif self.type == 'distinct':
@@ -121,8 +121,7 @@ class SimLAPFuse(nn.Module):
                 w = self.cls_head.get_weight()
                 g = (w[y1] * w[y2] > 0).float()
             
-    
-            simlap_loss += self.disparate_loss(rep,rep,y1,y2,g)
+            simlap_loss += self.disparate_loss(z,z,y1,y2,g)
             
         simlap_loss /= self.iter_num
         loss = sup_loss + simlap_loss
@@ -133,13 +132,12 @@ class SimLAPFuse(nn.Module):
         rep = self.backbone(samples)
         predict = self.cls_head(rep,*args,**kwargs)
         return predict
-    
-    
-    def disparate_loss(self, z1, k2, y1, posy,gate):        
-        
+
+
+    def disparate_loss(self, z1, k2, y1, posy, gate):
         scale = self.s
         self.log['scale'] = scale
-        cosine = similarity_gate(z1,k2,gate)
+        cosine = similarity_gate(z1, k2, gate)
         logits = scale * cosine
         
         c1_mask = (y1.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y1
@@ -449,8 +447,9 @@ def main(args):
     )
     
     # load weights to evaluate
-    model = SimLAPFuse(num_classes=args.nb_classes, model_name=args.model)
-        
+    backbone = build_model(args.model, num_classes=0)
+    model = SimLAPFuse(backbone, num_classes=args.nb_classes)
+
     print(f"Built Model ", model)
 
     if args.pretrained_weights:
