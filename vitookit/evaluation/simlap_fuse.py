@@ -517,7 +517,7 @@ def train(args,model,data_loader_train, data_loader_val):
     
 
     output_dir = Path(args.output_dir) if args.output_dir else None
-    if output_dir:
+    if output_dir and misc.is_main_process():
         output_dir.mkdir(parents=True, exist_ok=True)
         wandb.init(config=args,resume=args.resume is not None,dir=output_dir)
         

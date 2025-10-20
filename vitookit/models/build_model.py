@@ -1,19 +1,7 @@
 import gin
 import timm
-# try:
-import os
-import importlib.util
-import glob
 
 from torch import nn
-
-@gin.configurable()
-def create_backbone(model_name, **kwargs):
-    if isinstance(model_name,str):
-        backbone = timm.create_model(model_name, num_classes=0, **kwargs)
-    else:
-        backbone = model_name(**kwargs)
-    return backbone
 
 @gin.configurable()
 def build_model(model_name, **kwargs):
@@ -24,8 +12,8 @@ def build_model(model_name, **kwargs):
         print(f"Error creating model {model_name}: {e}")
         model = model_name(**kwargs)
     return model
-    
 
+@gin.configurable()
 def build_head(num_layers, input_dim, mlp_dim, output_dim, hidden_bn=True,activation=nn.ReLU,
                last_norm='bn',):
     mlp = []
