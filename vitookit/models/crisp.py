@@ -278,11 +278,11 @@ class VisionTransformer(nn.Module):
 
             return out_, x[:, (self.num_rgstrs+1):], hidden_states, bal_loss
 
-        if self.fc_norm is not None:
-            x[:, 0] = self.fc_norm(x[:, 1:, :].mean(1))
+        #if self.fc_norm is not None:
+        #    x[:, 0] = self.fc_norm(x[:, 1:, :].mean(1))
             
         # classifier 
-        cls_token = self.norm_cls(x[:, 0])
+        cls_token = self.norm_cls(x[:, 1:, :].mean(1))
         return self.head(cls_token)
 
     def get_last_selfattention(self, x):

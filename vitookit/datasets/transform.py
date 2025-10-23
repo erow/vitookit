@@ -141,3 +141,20 @@ def three_augmentation(img_size=224,color_jitter=0.4, src=False,
         ]
     return transforms.Compose(primary_tfl+secondary_tfl+final_tfl)
 
+
+class BatchAugmentation:
+    # https://openaccess.thecvf.com/content_CVPR_2020/papers/Hoffer_Augment_Your_Batch_Improving_Generalization_Through_Instance_Repetition_CVPR_2020_paper.pdf
+    def __init__(self, sampler, repeat=1):
+        self.sampler = sampler
+        self.repeat = repeat
+
+    def __len__(self):
+        return len(self.sampler)*self.repeat
+
+    def __iter__(self):
+        for index in self.sampler:
+            for _ in range(self.repeat):
+                yield index
+
+    def set_epoch(self, epoch):
+        self.sampler.set_epoch(epoch)

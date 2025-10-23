@@ -7,6 +7,9 @@ from torchvision import datasets, transforms
 import timm
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from torchvision.datasets.folder import ImageFolder, default_loader
+from vitookit.datasets.transform import three_augmentation, BatchAugmentation
+import torch
+from vitookit.utils import misc
 
 def img_loader(path):
     try:
@@ -236,3 +239,51 @@ class INatDataset(ImageFolder):
             categors = data_catg[target_current]
             target_current_true = targeter[categors[category]]
             self.samples.append((path_current, target_current_true))
+
+
+def build_loader(args):
+    if args.ThreeAugment:
+        transform = three_augmentation(args.input_size, args.color_jitter, args.src)
+    else:
+        transform = build_transform(is_train=True, args=args)
+    
+    dataset_train, args.nb_classes = build_dataset(args=args, is_train=True, trnsfrm=transform)
+    dataset_val, _ = build_dataset(is_train=False, args=args)
+    
+        
+    print("Load dataset:", dataset_train)
+
+    if True:  # args.distributed:
+        num_tasks = misc.get_world_size()
+        global_rank = misc.get_rank()
+        if args.ra<2:
+            sampler_train = torch.utils.data.DistributedSampler(
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+        else:
+            sampler_train = torch.utils.data.DistributedSampler(
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+            sampler_train = BatchAugmentation(sampler_train, repeat=args.ra)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    else:
+        sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train, sampler=sampler_train,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=True,
+    )
+
+    data_loader_val = torch.utils.data.DataLoader(
+        dataset_val, sampler=sampler_val,
+        batch_size=int(1.5 * args.batch_size),
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=False
+    )
+    
+    return data_loader_train, data_loader_val

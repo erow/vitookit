@@ -22,13 +22,12 @@ import json
 import os
 import math
 import sys
-from vitookit.datasets.transform import three_augmentation
+
 from vitookit.utils.helper import *
 from vitookit.utils import misc
 from vitookit.utils.layer_decay import param_groups_lrd
 from vitookit.models.build_model import build_model
 
-from vitookit.datasets.build_dataset import build_dataset, build_transform
 
 import timm
 import timm.optim
@@ -47,7 +46,14 @@ from timm.optim import create_optimizer
 from timm.utils import NativeScaler, accuracy
 from timm.data import Mixup
 from timm.layers import trunc_normal_
+import warnings
 
+
+from vitookit.datasets.build_dataset import build_loader
+try:
+    from vitookit.datasets.ffcv_transform import build_ffcv_loader
+except:
+    warnings.warn("failed to load ffcv")
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
@@ -192,23 +198,6 @@ def get_args_parser():
 
     return parser
 
-class BatchAugmentation:
-    # https://openaccess.thecvf.com/content_CVPR_2020/papers/Hoffer_Augment_Your_Batch_Improving_Generalization_Through_Instance_Repetition_CVPR_2020_paper.pdf
-    def __init__(self, sampler, repeat=1):
-        self.sampler = sampler
-        self.repeat = repeat
-
-    def __len__(self):
-        return len(self.sampler)*self.repeat
-
-    def __iter__(self):
-        for index in self.sampler:
-            for _ in range(self.repeat):
-                yield index
-
-    def set_epoch(self, epoch):
-        self.sampler.set_epoch(epoch)
-
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,lr_scheduler, max_norm: float = 0,
@@ -345,50 +334,10 @@ def main(args):
         except:
             pass
     
-    if args.ThreeAugment:
-        transform = three_augmentation(args.input_size, args.color_jitter, args.src)
+    if args.train_path:
+        data_loader_train, data_loader_val = build_ffcv_loader(args)
     else:
-        transform = build_transform(is_train=True, args=args)
-    
-    dataset_train, args.nb_classes = build_dataset(args=args, is_train=True, trnsfrm=transform)
-    dataset_val, _ = build_dataset(is_train=False, args=args)
-    
-        
-    print("Load dataset:", dataset_train)
-
-    if True:  # args.distributed:
-        num_tasks = misc.get_world_size()
-        global_rank = misc.get_rank()
-        if args.ra<2:
-            sampler_train = torch.utils.data.DistributedSampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-            )
-        else:
-            sampler_train = torch.utils.data.DistributedSampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-            )
-            sampler_train = BatchAugmentation(sampler_train, repeat=args.ra)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    else:
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=True,
-    )
-
-    data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, sampler=sampler_val,
-        batch_size=int(1.5 * args.batch_size),
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False
-    )
-    
+        data_loader_train, data_loader_val = build_loader(args)
     # load weights to evaluate
     
     model = build_model(args.model, num_classes=args.nb_classes)
@@ -402,7 +351,7 @@ def train(args,model,data_loader_train, data_loader_val):
 
     model = convert_sync_batchnorm(model)
     model_without_ddp = model
-    import torch   
+    import torch
     
     device = torch.device(args.device)
     mixup_fn = None

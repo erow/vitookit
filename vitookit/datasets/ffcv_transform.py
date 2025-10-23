@@ -5,6 +5,8 @@ from ffcv.transforms import ToTensor, ToDevice, ToTorchImage, NormalizeImage,Ran
 from ffcv.transforms.color_jitter import RandomColorJitter
 from ffcv.transforms.solarization import RandomSolarization
 from ffcv.fields.decoders import IntDecoder, RandomResizedCropRGBImageDecoder, SimpleRGBImageDecoder, CenterCropRGBImageDecoder
+from ffcv import Loader
+from ffcv.loader import OrderOption
 
 import torch
 import torchvision.transforms.v2 as tfms
@@ -121,3 +123,16 @@ def ColorJitterPipeline(img_size=224,scale=(0.08, 1.0),device='cuda'):
     } 
     pipelines['label'] = label_pipeline
     return pipelines
+
+def build_ffcv_loader(args):
+    order = OrderOption.RANDOM if args.distributed else OrderOption.QUASI_RANDOM
+    data_loader_train =  Loader(args.train_path, pipelines=ThreeAugmentPipeline(img_size=args.input_size),batches_ahead=10,
+                        batch_size=args.batch_size, num_workers=args.num_workers, 
+                        order=order, distributed=args.distributed,seed=args.seed)
+    
+
+    data_loader_val =  Loader(args.val_path, pipelines=ValPipeline(img_size=args.input_size),
+                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=10,
+                        distributed=args.distributed,seed=args.seed)
+    print("Load dataset:", data_loader_train)
+    return data_loader_train, data_loader_val
