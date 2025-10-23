@@ -125,13 +125,16 @@ def ColorJitterPipeline(img_size=224,scale=(0.08, 1.0),device='cuda'):
     return pipelines
 
 def build_ffcv_loader(args):
+    train_transform = ThreeAugmentPipeline(img_size=args.input_size,device=args.device)
+    val_transform = ValPipeline(img_size=args.input_size,device=args.device)
     order = OrderOption.RANDOM if args.distributed else OrderOption.QUASI_RANDOM
-    data_loader_train =  Loader(args.train_path, pipelines=ThreeAugmentPipeline(img_size=args.input_size),batches_ahead=10,
+    
+    data_loader_train =  Loader(args.train_path, pipelines=train_transform,batches_ahead=10,
                         batch_size=args.batch_size, num_workers=args.num_workers, 
                         order=order, distributed=args.distributed,seed=args.seed)
     
 
-    data_loader_val =  Loader(args.val_path, pipelines=ValPipeline(img_size=args.input_size),
+    data_loader_val =  Loader(args.val_path, pipelines=val_transform,
                         batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=10,
                         distributed=args.distributed,seed=args.seed)
     print("Load dataset:", data_loader_train)

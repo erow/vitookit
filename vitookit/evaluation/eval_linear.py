@@ -2,6 +2,7 @@
 
 Usage: vitrun 
 """
+import warnings
 from PIL import Image # hack to avoid `CXXABI_1.3.9' not found error
 import argparse
 import datetime
@@ -14,13 +15,13 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+from torchvision.transforms import *
 import wandb
 from vitookit.models.build_model import build_model
 
 from vitookit.utils import misc
 from vitookit.datasets import build_dataset
 
-from torchvision.transforms import *
 from vitookit.utils.helper import post_args, load_pretrained_weights, log_metrics, restart_from_checkpoint
 from timm.models.layers import trunc_normal_
 from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
@@ -29,6 +30,10 @@ from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
 from vitookit.utils.lars import LARS
 import gin
 
+try:
+    from vitookit.datasets.ffcv_transform import *
+except:
+    warnings.warn("failed to load ffcv")
 
 
 def get_args_parser():
@@ -77,9 +82,12 @@ def get_args_parser():
     parser.add_argument('--data_set',default='IN1K',type=str)
     parser.add_argument('--data_location', default='./data', type=str,
                         help='dataset path')
-    parser.add_argument('--nb_classes', default=None, type=int,
-                        help='number of the classification types')
+    
+    parser.add_argument("--train_path", type=str, default=None, help="The ffcv file for training.")
+    parser.add_argument("--val_path", type=str, default=None, help="The ffcv file for validation.")
+    parser.add_argument("--nb_classes", default=1000, type=int, help="The number of classes in the dataset.")
 
+    # training parameters
     parser.add_argument('--output_dir', default=None, type=str,
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
@@ -92,8 +100,6 @@ def get_args_parser():
                         help='start epoch')
     parser.add_argument('--eval', action='store_true',
                         help='Perform evaluation only')
-    parser.add_argument('--dist_eval', action='store_true', default=False,
-                        help='Enabling distributed evaluation (recommended during training for faster monitor')
     parser.add_argument('--num_workers', default=8, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
@@ -137,47 +143,66 @@ def main(args):
 
     cudnn.benchmark = True
     
-    train_transform = Compose([
-        RandomResizedCrop(224),
-        RandomHorizontalFlip(),
-        ToTensor(),
-        Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-    ])
-    val_transform = Compose([
-        Resize(256, interpolation=3),
-        CenterCrop(224),
-        ToTensor(),
-        Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-    ])
+    
+
+    if args.train_path is None:
+        train_transform = Compose([
+            RandomResizedCrop(args.input_size, scale=(0.08, 1.0), interpolation=3),
+            RandomHorizontalFlip(),
+            ToTensor(),
+            Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        val_transform = Compose([
+            Resize(args.input_size*256//224, interpolation=3),
+            CenterCrop(args.input_size),
+            ToTensor(),
+            Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
         
-    dataset_train,nb_classes = build_dataset(is_train=True, args=args,trnsfrm=train_transform)
-    dataset_val,_ = build_dataset(is_train=False, args=args,trnsfrm=val_transform)
-    if args.nb_classes is None: args.nb_classes=nb_classes
+        dataset_train,nb_classes = build_dataset(is_train=True, args=args,trnsfrm=train_transform)
+        dataset_val,_ = build_dataset(is_train=False, args=args,trnsfrm=val_transform)
+        if args.nb_classes is None: args.nb_classes=nb_classes
     
-    print("Dataset = ", str(dataset_train))
-    print("len(Dataset), nb_classes = ", len(dataset_train), args.nb_classes)
-    
-    if True:  
+        print("Dataset = ", str(dataset_train))
+        print("len(Dataset), nb_classes = ", len(dataset_train), args.nb_classes)
+        
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
         print("Sampler_train = %s" % str(sampler_train))
-        if args.dist_eval:
-            if len(dataset_val) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_val = torch.utils.data.DistributedSampler(
-                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        else:
-            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    else:
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        
+        sampler_val = torch.utils.data.DistributedSampler(
+            dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
+        
+        data_loader_train = torch.utils.data.DataLoader(
+            dataset_train, sampler=sampler_train,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=True,
+        )
 
-    if global_rank == 0 and args.output_dir and not args.eval:
+        data_loader_val = torch.utils.data.DataLoader(
+            dataset_val, sampler=sampler_val,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=False
+        )
+    else:
+        train_transform = SimplePipeline(img_size=args.input_size,device=args.device)
+        val_transform = ValPipeline(img_size=args.input_size,device=args.device)
+        order = OrderOption.RANDOM if args.distributed else OrderOption.QUASI_RANDOM
+        data_loader_train =  Loader(args.train_path, pipelines=train_transform,
+                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=6,
+                        order=order, distributed=args.distributed,seed=args.seed)
+        data_loader_val =  Loader(args.val_path, pipelines=val_transform,
+                        batch_size=args.batch_size, num_workers=args.num_workers, batches_ahead=6,
+                        distributed=args.distributed,seed=args.seed)
+
+    if misc.get_rank() == 0 and args.output_dir:
         wandb.init(job_type='linprob',
                    dir=args.output_dir,
                    config=args.__dict__,
@@ -185,21 +210,7 @@ def main(args):
     else:
         log_writer = None
 
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=True,
-    )
-
-    data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, sampler=sampler_val,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False
-    )
+    
     
     model = build_model(args.model, num_classes=args.nb_classes)
     
@@ -310,7 +321,9 @@ def main(args):
     output_dir = Path(args.output_dir) if args.output_dir else None
         
     for epoch in range(args.start_epoch, args.epochs):
-        data_loader_train.sampler.set_epoch(epoch)
+        if args.train_path is None:
+            data_loader_train.sampler.set_epoch(epoch)
+        
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,

@@ -247,9 +247,10 @@ def build_loader(args):
     else:
         transform = build_transform(is_train=True, args=args)
     
-    dataset_train, args.nb_classes = build_dataset(args=args, is_train=True, trnsfrm=transform)
+    dataset_train, nb_classes = build_dataset(args=args, is_train=True, trnsfrm=transform)
     dataset_val, _ = build_dataset(is_train=False, args=args)
-    
+    if nb_classes:
+        args.nb_classes = nb_classes
         
     print("Load dataset:", dataset_train)
 

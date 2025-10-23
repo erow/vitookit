@@ -96,6 +96,9 @@ def get_args_parser():
                         help='Layer-wise learning rate decay. Use `lr_scale` in param dict to change the learning rate for parameters.')
     parser.add_argument('--no_amp', action='store_true', default=False, help='Disable AMP (automatic mixed precision)')
     
+    parser.add_argument('--disable_weight_decay_on_bias_norm', action='store_true', default=False)
+    parser.add_argument('--init_scale', default=1.0, type=float)
+    
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"', choices=['cosine', 'step', 'plateau'])
@@ -161,15 +164,18 @@ def get_args_parser():
     parser.add_argument('--mixup_mode', type=str, default='batch',
                         help='How to apply mixup/cutmix params. Per "batch", "pair", or "elem"')
 
-    # * Finetuning params
-    parser.add_argument('--disable_weight_decay_on_bias_norm', action='store_true', default=False)
-    parser.add_argument('--init_scale', default=1.0, type=float)
 
     # Dataset parameters
     parser.add_argument('--data_location', default='/datasets01/imagenet_full_size/061417/', type=str,
                         help='dataset path')
     parser.add_argument('--data_set', default='IN1K', 
                             type=str, help='ImageNet dataset path')
+    
+    
+    parser.add_argument("--train_path", type=str, default=None, help="The ffcv file for training.")
+    parser.add_argument("--val_path", type=str, default=None, help="The ffcv file for validation.")
+    parser.add_argument("--nb_classes", default=1000, type=int, help="The number of classes in the dataset.")
+    
 
     parser.add_argument('--output_dir', default=None, type=str,
                         help='path where to save, empty for no saving')
