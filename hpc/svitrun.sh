@@ -11,6 +11,7 @@
 #SBATCH --error=outputs/slurm/%j_%t_log.err
 #SBATCH --output=outputs/slurm/%j_%t_log.out
 
+scontrol update JobId=$SLURM_JOBID JobName=${WANDB_NAME:-svitrun} # Rename job in squeue
 ARGS=${@}
 
 export RDZV_HOST=$(hostname)
@@ -29,7 +30,7 @@ echo "================= SLURM JOB START ================"
 
 # vitrun --nproc_per_node=$SLURM_GPUS_ON_NODE --master_port $PORT --node-rank $SLURM_PROCID $ARGS
 
-vitrun --nnodes=$SLURM_JOB_NUM_NODES \
+srun vitrun --nnodes=$SLURM_JOB_NUM_NODES \
     --nproc_per_node=$SLURM_GPUS_PER_NODE \
     --rdzv_id=$SLURM_JOB_ID \
     --rdzv_backend=c10d \

@@ -342,12 +342,13 @@ def main(args):
     
     if args.train_path:
         data_loader_train, data_loader_val = build_ffcv_loader(args)
+        # preload ffcv dataset 
+        for _ in data_loader_train: pass
+        for _ in data_loader_val: pass
     else:
         data_loader_train, data_loader_val = build_loader(args)
-    # load weights to evaluate
     
     model = build_model(args.model, num_classes=args.nb_classes)
-    print(f"Built Model ", model)
 
     if args.pretrained_weights:
         load_pretrained_weights(model, args.pretrained_weights, checkpoint_key=args.checkpoint_key, prefix=args.prefix)
@@ -357,6 +358,7 @@ def train(args,model,data_loader_train, data_loader_val):
 
     model = convert_sync_batchnorm(model)
     model_without_ddp = model
+    print(f"Built Model ", model)
     import torch
     
     device = torch.device(args.device)
@@ -416,7 +418,7 @@ def train(args,model,data_loader_train, data_loader_val):
         for name, p in model.named_parameters():
             if 'head' in name or 'fc' in name or 'embed' in name:
                 adamw_params.append(p)
-            elif p.ndim == 2:
+            elif p.ndim == 2 or p.ndim == 4:
                 muon_params.append(p)
             else:
                 adamw_params.append(p)

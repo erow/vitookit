@@ -178,7 +178,8 @@ def evaluate(data_loader, model, device):
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,lr_scheduler, max_norm: float = 0,
-                     mixup_fn: 'Mixup' = None, accum_iter=1
+                     mixup_fn: 'Mixup' = None, accum_iter=1,
+                     model_ema=None
                     ):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")

@@ -8,7 +8,7 @@ import math
 # https://github.com/KellerJordan/Muon/blob/master/muon.py
 # https://github.com/MoonshotAI/Moonlight/blob/master/examples/toy_train.py
 @torch.compile
-def zeropower_via_newtonschulz5(G, steps):
+def zeropower_via_newtonschulz5(G, steps=3, eps=1e-7):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
     quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
@@ -24,7 +24,7 @@ def zeropower_via_newtonschulz5(G, steps):
     if G.size(0) > G.size(1):
         X = X.T
     # Ensure spectral norm is at most 1
-    X = X / (X.norm() + 1e-7)
+    X = X / (X.norm() + eps)
     # Perform the NS iterations
     for _ in range(steps):
         A = X @ X.T
@@ -95,7 +95,7 @@ class Muon(torch.optim.Optimizer):
         # Sort parameters into those for which we will use Muon, and those for which we will not
         for p in muon_params:
             # Use Muon for every parameter in muon_params which is >= 2D and doesn't look like an embedding or head layer
-            assert p.ndim == 2, p.ndim
+            assert p.ndim == 2 or p.ndim == 4, p.ndim
             self.state[p]["use_muon"] = True
         for p in adamw_params:
             # Do not use Muon for parameters in adamw_params
@@ -139,30 +139,42 @@ class Muon(torch.optim.Optimizer):
                 g = p.grad
                 if g is None:
                     continue
-                if g.ndim > 2:
-                    g = g.view(g.size(0), -1)
                 assert g is not None
+                if g.ndim == 2:
+                    # calc update
+                    state = self.state[p]
+                    if "momentum_buffer" not in state:
+                        state["momentum_buffer"] = torch.zeros_like(g)
+                    buf = state["momentum_buffer"]
+                    buf.mul_(momentum).add_(g)
+                    if group["nesterov"]:
+                        g = g.add(buf, alpha=momentum)
+                    else:
+                        g = buf
+                    u = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
 
-                # calc update
-                state = self.state[p]
-                if "momentum_buffer" not in state:
-                    state["momentum_buffer"] = torch.zeros_like(g)
-                buf = state["momentum_buffer"]
-                buf.mul_(momentum).add_(g)
-                if group["nesterov"]:
-                    g = g.add(buf, alpha=momentum)
-                else:
-                    g = buf
-                u = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
+                    # scale update
+                    adjusted_lr = self.adjust_lr_for_muon(lr, p.shape)
 
-                # scale update
-                adjusted_lr = self.adjust_lr_for_muon(lr, p.shape)
+                    # apply weight decay
+                    p.data.mul_(1 - lr * wd)
 
-                # apply weight decay
-                p.data.mul_(1 - lr * wd)
+                    # apply update
+                    p.data.add_(u, alpha=-adjusted_lr)
+                elif g.ndim == 4:
+                    # https://github.com/KellerJordan/cifar10-airbench/blob/master/airbench94_muon.py#L56
+                    state = self.state[p]
 
-                # apply update
-                p.data.add_(u, alpha=-adjusted_lr)
+                    if "momentum_buffer" not in state.keys():
+                        state["momentum_buffer"] = torch.zeros_like(g)
+                    buf = state["momentum_buffer"]
+                    buf.mul_(momentum).add_(g)
+                    g = g.add(buf, alpha=momentum) if group["nesterov"] else buf
+
+                    p.data.mul_(len(p.data)**0.5 / p.data.norm()) # normalize the weight
+                    update = zeropower_via_newtonschulz5(g.reshape(len(g), -1)).view(g.shape) # whiten the update
+                    p.data.add_(update, alpha=-lr) # take a step
+
 
             ############################
             #       AdamW backup       #

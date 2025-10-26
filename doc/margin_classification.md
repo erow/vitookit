@@ -15,15 +15,16 @@
 ```
 
 Run:
+```bash
+# 96.35, https://wandb.ai/erow/margin/runs/15xo55eq/
+WANDB_NAME=arcgrad_vitt_e200 vitrun eval_cls_margin.py  --ckpt_freq 2 --opt adamw --lr 0.001 --weight_decay 0.05   --batch_size=256 --ra=3 --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model vit_tiny_patch16_224 --gin "build_transform.scale=(0.8,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.patch_size=2 build_model.img_size=32  --margin_loss arcgrad
+
+# 96.21，https://wandb.ai/erow/margin/runs/dtktrgov/overview
+WANDB_NAME=arcgrad sbatch svitrun.sh eval_cls_margin.py --ckpt_freq 2 --opt muon --lr 0.002 --weight_decay 5e-4 --warmup_epochs=10 --epochs 100 --batch_size=128 --ra=3 --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 64 --model resnet18 --gin build_transform.scale=(0.8,1) "build_transform.mean=(0.4914, 0.4822, 0.4465)" "build_transform.std=(0.2470, 0.2435, 0.2616)" build_model.stem_type='deep' build_model.output_stride=8 MarginHead.s=10 --margin_loss arcgrad 
+
 ```
-WANDB_NAME=arcgrad_s5 sbatch svitrun.sh eval_cls_margin.py  --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 10  --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8 MarginHead.s=5  --margin_loss arcgrad  --output_dir ../outputs/margin/arcgrad_s5
+margin_loss options: arcface, softmax, arcgrad.
 
-WANDB_NAME=arcface_s10 sbatch svitrun.sh eval_cls_margin.py  --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 10  --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8 MarginHead.s=10 --margin_loss arcface  --output_dir ../outputs/margin/arcface_s10
-
-WANDB_NAME=soft_s10 sbatch svitrun.sh eval_cls_margin.py  --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 10  --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8  --margin_loss softmax  --output_dir ../outputs/margin/soft_s10
-
-WANDB_NAME=arcgrad_vitt_e200 vitrun eval_cls_margin.py  --ckpt_freq 2 --opt muon --lr 0.001 --weight_decay 0.05  --warmup_epochs=10 --epochs 200  --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model vit_tiny_patch16_224 --gin "build_transform.scale=(0.8,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.patch_size=2 build_model.img_size=32   --margin_loss arcgrad 
-```
 ## ArcGrad
 Angular Gradient Margin Loss (ArcGrad), which promotes intra-class compactness and inter-class separability by generating a "gradient margin". Key contributions of the paper include:
 

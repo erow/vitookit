@@ -50,7 +50,6 @@ def ValPipeline(img_size=224,ratio= 224/256,device='cuda'):
     } 
     return pipelines  
 
-from torchvision.transforms import InterpolationMode
 
 class ThreeAugmentation(nn.Module):
     """Apply single transformation randomly picked from a list. This transform does not support torchscript."""
