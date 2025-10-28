@@ -182,7 +182,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default=None, help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=10, type=int)
@@ -335,7 +335,7 @@ def main(args):
     # logging system
     if args.output_dir and misc.is_main_process():
         try:
-            wandb.init(job_type='finetune',dir=args.output_dir,resume=True if args.resume else False, 
+            wandb.init(job_type='finetune',dir=args.output_dir,resume=not args.resume is None, 
                    config=args.__dict__)
         except:
             pass
