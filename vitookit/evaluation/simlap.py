@@ -27,7 +27,7 @@ from vitookit.datasets.transform import three_augmentation
 from vitookit.utils.helper import *
 from vitookit.utils import misc
 from vitookit.utils.layer_decay import param_groups_lrd
-from vitookit.models.build_model import build_head, build_model, create_backbone
+from vitookit.models.build_model import build_head, build_model
 
 from vitookit.datasets.build_dataset import build_dataset, build_transform
 from timm.layers import (F, convert_splitbn_model, convert_sync_batchnorm,
