@@ -158,7 +158,8 @@ class SimLAP(nn.Module):
         
         return dict(
             stem=r'cls_token|pos_embed|patch_embed',  # stem and embed
-            blocks=[(r'backbone\.blocks\.(\d+)', None), (r'backbone\.norm', (99999,))]
+            blocks=[(r'backbone\.blocks\.(\d+)', None), (r'backbone\.norm', (99999,))],
+            head=r'projector|cls_head|filter'
         )
 
     @torch.no_grad()
@@ -221,7 +222,7 @@ class SimLAP(nn.Module):
         class_mask = c1_mask|c2_mask
         neg_mask = ~class_mask
 
-        loss = multipos_ce_loss(logits, class_mask, neg_mask)
+        loss = multipos_ce_loss(logits, c2_mask, neg_mask)
         
         # self.log['cosine@c1'] = ((cosine*c1_mask).sum()/c1_mask.sum()).item()
         # self.log['cosine@c2'] = ((cosine*c2_mask).sum()/c2_mask.sum()).item()

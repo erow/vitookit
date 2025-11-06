@@ -429,6 +429,10 @@ def train(args,model,data_loader_train, data_loader_val):
                          muon_params=muon_params, adamw_params=adamw_params,
                          adamw_betas=args.opt_betas, adamw_eps=args.opt_eps)
     else:
+        if args.layer_decay is not None:
+            from timm.models import group_parameters,group_modules
+            layer_map = group_parameters(model_without_ddp, model_without_ddp.group_matcher(coarse=False), reverse=True)
+            print('layer decay parameters: ', layer_map)
         optimizer = create_optimizer(args, model_without_ddp, 
                                      filter_bias_and_bn=not args.disable_weight_decay_on_bias_norm)
     
@@ -551,6 +555,7 @@ def train(args,model,data_loader_train, data_loader_val):
     protocol = os.path.basename(sys.argv[0]).replace('.py', '')
     basename = f"{protocol}-{args.data_set}"
     log_metrics(basename, log_stats, args)
+    exit()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])

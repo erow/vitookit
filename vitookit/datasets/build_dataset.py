@@ -277,6 +277,7 @@ def build_loader(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        persistent_workers=True,
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -284,7 +285,8 @@ def build_loader(args):
         batch_size=int(1.5 * args.batch_size),
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        persistent_workers=True,
     )
     
     return data_loader_train, data_loader_val
