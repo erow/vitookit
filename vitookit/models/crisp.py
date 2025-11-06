@@ -4,7 +4,10 @@ https://github.com/facebookresearch/dino
 https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
 """
 
+from collections.abc import Set
 import math
+from typing import List, Union, Dict
+
 import torch
 import torch.nn as nn
 
@@ -131,6 +134,7 @@ class PatchEmbed(nn.Module):
         B, C, H, W = x.shape
         return self.proj(x)
 
+# from timm.models.vision_transformer import VisionTransformer as _VisionTransformer 
 class VisionTransformer(nn.Module):
     """ Vision Transformer """
     def __init__(self, img_size=[224], patch_size=16, in_chans=3, num_classes=0, embed_dim=768, depth=12,
@@ -191,6 +195,27 @@ class VisionTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+
+    @torch.jit.ignore
+    def no_weight_decay(self) -> Set[str]:
+        """Set of parameters that should not use weight decay."""
+        return {'pos_embed', 'cls_token', 'rgstr_tokens'}
+
+    @torch.jit.ignore
+    def group_matcher(self, coarse: bool = False) -> Dict[str, Union[str, List]]:
+        """Create regex patterns for parameter grouping.
+
+        Args:
+            coarse: Use coarse grouping.
+
+        Returns:
+            Dictionary mapping group names to regex patterns.
+        """
+        return dict(
+            stem=r'^cls_token|pos_embed|patch_embed',  # stem and embed
+            blocks=[(r'^blocks\.(\d+)', None), (r'^norm', (99999,))]
+        )
+        
     def interpolate_pos_encoding(self, x, w, h):
         npatch = x.shape[1] - 1
         N = self.pos_embed.shape[1] - 1

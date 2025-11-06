@@ -137,6 +137,29 @@ class SimLAP(nn.Module):
         self.filter = Filter(num_classes=num_classes,embed_dim=out_dim)
         
         self.cls_head = nn.Linear(embed_dim,num_classes)
+        
+
+    @torch.jit.ignore
+    def no_weight_decay(self) -> "Set[str]":
+        """Set of parameters that should not use weight decay."""
+        backbone = self.backbone.no_weight_decay()
+        return {'backbone.'+k for k in backbone}
+
+    @torch.jit.ignore
+    def group_matcher(self, coarse: bool = False) -> "Dict[str, Union[str, List]]":
+        """Create regex patterns for parameter grouping.
+
+        Args:
+            coarse: Use coarse grouping.
+
+        Returns:
+            Dictionary mapping group names to regex patterns.
+        """
+        
+        return dict(
+            stem=r'cls_token|pos_embed|patch_embed',  # stem and embed
+            blocks=[(r'backbone\.blocks\.(\d+)', None), (r'backbone\.norm', (99999,))]
+        )
 
     @torch.no_grad()
     def representation(self, x):
