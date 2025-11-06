@@ -226,7 +226,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         with torch.amp.autocast('cuda',enabled=True if loss_scaler is not None else False):
             outputs = model(samples)
-            loss = criterion( outputs, targets)
+            loss = criterion(outputs, targets)
         
         loss /= accum_iter
         if loss_scaler is not None:

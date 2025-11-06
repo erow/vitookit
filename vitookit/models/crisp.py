@@ -256,33 +256,8 @@ class VisionTransformer(nn.Module):
         if self.fc_norm is not None:
             x[:, 0] = self.fc_norm(x[:, 1:, :].mean(1))
         
-        return_all_tokens = self.return_all_tokens if \
-            return_all_tokens is None else return_all_tokens
-            
-        if return_all_tokens:
-            glob = x[:, 4:self.num_rgstrs]  # (B, K,  D)
-
-            w = glob.norm(dim=-1, keepdim=True) # -> (B, K, 1)
-
-            # normalise w
-            alpha = 1.0 # temperature
-            w = torch.softmax(alpha * w.squeeze(-1), dim=1).unsqueeze(-1)
-            pooled = ( (w * glob).sum(dim=1) + x[:, self.num_rgstrs] ) / 2
-
-            #out_ =  torch.cat( (self.norm_cls(x[:, self.num_rgstrs].unsqueeze(1)) , self.norm(x[:, (self.num_rgstrs + 1):]) ), dim=1) 
-
-            out_ =  torch.cat( (self.norm_cls(pooled.unsqueeze(1)) , self.norm(x[:, (self.num_rgstrs + 1):]) ), dim=1)
-            ### balancing weight
-            p   = w.mean(dim=0).squeeze(-1)                 # (K,) usage across batch
-            bal_loss  = (p * (p.log() + math.log(glob.shape[1]))).sum()
-
-            return out_, x[:, (self.num_rgstrs+1):], hidden_states, bal_loss
-
-        #if self.fc_norm is not None:
-        #    x[:, 0] = self.fc_norm(x[:, 1:, :].mean(1))
-            
         # classifier 
-        cls_token = self.norm_cls(x[:, 1:, :].mean(1))
+        cls_token = x[:, self.num_rgstrs, :]
         return self.head(cls_token)
 
     def get_last_selfattention(self, x):
