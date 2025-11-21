@@ -218,13 +218,15 @@ class SimLAP(nn.Module):
     
     def disparate_loss(self, z1, k2, y1, posy):
         k2 = misc.concat_all_gather_grad(k2)
-        # fz1,fz2 = self.filter(z1, k2, y1,posy)
         gate = self.filter.gate(y1,posy)
+        fz1, fz2 = apply_gate(gate, z1, k2)
+        # fz1,fz2 = self.filter(z1, k2, y1,posy)
+        cosine = contrast(fz1,fz2)
         scale = self.s
         self.log['scale'] = scale
-        logits = contrast(z1*gate*gate,k2)
-        # cosine = contrast(fz1,fz2)
-        # logits = scale * cosine
+        # logits = contrast(z1*gate*gate,k2)
+        
+        logits = scale * cosine
         
         c1_mask = (y1.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y1
         c2_mask = (posy.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y2
