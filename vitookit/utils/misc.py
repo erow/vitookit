@@ -21,10 +21,10 @@ import warnings
 import numpy as np
 import torch
 import torch.distributed as dist
-import argparse
+from torch.distributed import group, ReduceOp, is_initialized
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from collections import defaultdict, deque
-from pathlib import Path
 from torch import Tensor, nn
 
 def load_pretrained_weights(model, pretrained_weights, checkpoint_key, model_name, patch_size):
@@ -467,6 +467,40 @@ def concat_all_gather(tensor):
     output = torch.cat(tensors_gather, dim=0)
     return output
 
+class AllGatherGrad(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx: Any,
+        tensor: Tensor,
+        group: Optional["torch.distributed.ProcessGroup"] = group.WORLD,
+    ) -> Tensor:
+        ctx.group = group
+
+        gathered_tensor = [torch.zeros_like(tensor) for _ in range(torch.distributed.get_world_size())]
+
+        torch.distributed.all_gather(gathered_tensor, tensor, group=group)
+        gathered_tensor = torch.stack(gathered_tensor, dim=0)
+
+        return gathered_tensor
+
+    @staticmethod
+    def backward(ctx: Any, *grad_output: Tensor) -> Tuple[Tensor, None]:
+        # print("backward------------->")
+        # print(grad_output)
+        grad_output = torch.cat(grad_output)
+
+        torch.distributed.all_reduce(grad_output, op=torch.distributed.ReduceOp.SUM, async_op=False, group=ctx.group)
+
+        return grad_output[torch.distributed.get_rank()], None
+
+def concat_all_gather_grad(tensor):
+    """
+    Performs all_gather operation on the provided tensors.
+    *** Warning ***: torch.distributed.all_gather has no gradient.
+    """
+    if not is_initialized():
+        return tensor
+    return AllGatherGrad.apply(tensor).flatten(0,1)
 
 class PCA():
     """

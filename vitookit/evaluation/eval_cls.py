@@ -555,7 +555,12 @@ def train(args,model,data_loader_train, data_loader_val):
     protocol = os.path.basename(sys.argv[0]).replace('.py', '')
     basename = f"{protocol}-{args.data_set}"
     log_metrics(basename, log_stats, args)
-    exit()
+    
+    # kill data loader workers
+    if hasattr(data_loader_train,'cleanup'):
+        data_loader_train.cleanup()
+        data_loader_val.cleanup()
+    dist.destroy_process_group()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])

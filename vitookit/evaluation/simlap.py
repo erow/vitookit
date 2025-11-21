@@ -111,11 +111,25 @@ class Filter(nn.Module):
         logits =  torch.einsum("bj,bnj->bn",x1,x2)
         return logits
 
+def apply_gate(gate, x1, x2):
+    x1 = torch.einsum("bk,bk->bk",x1,gate)
+    x2 = torch.einsum("nk,bk->bnk",x2,gate)
+    x1 =  F.normalize(x1,p=2,dim=-1)
+    x2 =  F.normalize(x2,p=2,dim=-1)
+    return x1, x2
+
+def contrast(x1,x2):
+    if x2.dim() == 3:
+        logits =  torch.einsum("bj,bnj->bn",x1,x2)
+    else:
+        logits = x1 @ x2.t()
+    return logits
 
 @gin.configurable
 class SimLAP(nn.Module):
     def __init__(self,
                  backbone: nn.Module,
+                 embed_dim=512,
                  out_dim=256,
                  mlp_dim=2048, 
                  type='arbitrary',
@@ -123,10 +137,9 @@ class SimLAP(nn.Module):
                  sup_loss=False, # whether to use supervised loss
                  num_classes=1000):
         super(SimLAP, self).__init__()
-        embed_dim = backbone.embed_dim
         assert type in ['arbitrary','identical','distinct']
         self.type = type
-        self.s = 1/temperature
+        self.s = 1 / temperature
         self.num_classes = num_classes
         self.out_dim = out_dim
         self.sup_loss = sup_loss
@@ -142,8 +155,10 @@ class SimLAP(nn.Module):
     @torch.jit.ignore
     def no_weight_decay(self) -> "Set[str]":
         """Set of parameters that should not use weight decay."""
-        backbone = self.backbone.no_weight_decay()
-        return {'backbone.'+k for k in backbone}
+        if hasattr(self.backbone, 'no_weight_decay'):
+            backbone = self.backbone.no_weight_decay()
+            return {'backbone.'+k for k in backbone}
+        return set()
 
     @torch.jit.ignore
     def group_matcher(self, coarse: bool = False) -> "Dict[str, Union[str, List]]":
@@ -181,20 +196,13 @@ class SimLAP(nn.Module):
 
         z = self.projector(rep)
 
-        
-        _v, ord = targets.sort(dim=1,descending=True)
-        
-        # import torchvision
-        # torchvision.utils.save_image(samples[:64], 'debug/simlap_inputs.png',nrow=8,normalize=True)
-        y1 = ord[:,0]
-        y2 = ord[:,1] 
-    
-        # if self.type == 'identical':
-        #     y2 = targets
-        # elif self.type == 'distinct':
-        #     y2 = (targets + torch.randint(1,self.num_classes,(len(targets),),device=targets.device))%self.num_classes
-        # else:
-        #     y2 = targets[torch.randperm(len(targets),device=targets.device)]
+        y1 = targets
+        if self.type == 'identical':
+            y2 = targets
+        elif self.type == 'distinct':
+            y2 = (targets + torch.randint(1,self.num_classes,(len(targets),),device=targets.device))%self.num_classes
+        else:
+            y2 = targets[torch.randperm(len(targets),device=targets.device)]
 
         loss = self.disparate_loss(z,z,y1,y2)
         loss += F.cross_entropy(predict, targets)
@@ -209,13 +217,14 @@ class SimLAP(nn.Module):
     
     
     def disparate_loss(self, z1, k2, y1, posy):
-        # k2 = misc.concat_all_gather(k2)
-        fz1,fz2 = self.filter(z1, k2, y1,posy)
-        
+        k2 = misc.concat_all_gather_grad(k2)
+        # fz1,fz2 = self.filter(z1, k2, y1,posy)
+        gate = self.filter.gate(y1,posy)
         scale = self.s
         self.log['scale'] = scale
-        cosine = self.filter.contrast(fz1,fz2)
-        logits = scale * cosine
+        logits = contrast(z1*gate*gate,k2)
+        # cosine = contrast(fz1,fz2)
+        # logits = scale * cosine
         
         c1_mask = (y1.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y1
         c2_mask = (posy.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y2
@@ -232,8 +241,14 @@ class SimLAP(nn.Module):
 from vitookit.evaluation import eval_cls
 _train = eval_cls.train
 def pre_train(args,model,data_loader_train, data_loader_val):
-    model.head = torch.nn.Identity()
-    model = SimLAP(model,num_classes=args.nb_classes)
+    if hasattr(model,'fc'):
+        embed_dim = model.fc.in_features
+        model.fc = torch.nn.Identity()
+    else:
+        embed_dim = model.embed_dim
+        model.head = torch.nn.Identity()
+    
+    model = SimLAP(model,num_classes=args.nb_classes, embed_dim=embed_dim)
     model.cuda()
     _train(args,model,data_loader_train, data_loader_val)
 
@@ -256,8 +271,8 @@ def train_one_epoch(model: torch.nn.Module, _criterion: torch.nn.Module,
         targets = targets.to(device, non_blocking=True)
 
         lr_scheduler.step(epoch+itr/len(data_loader))
-        if mixup_fn is not None:
-            samples, targets = mixup_fn(samples, targets)
+        # if mixup_fn is not None: disable mixup for simlap
+        #     samples, targets = mixup_fn(samples, targets)
 
         with torch.amp.autocast('cuda',enabled=True if loss_scaler is not None else False):
             loss,log = criterion(samples, targets)

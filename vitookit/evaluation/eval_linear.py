@@ -292,7 +292,7 @@ def main(args):
         model.to(device).eval()
         with torch.no_grad():    
             test_stats = evaluate(data_loader_val, model, device)
-            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            print(f"Accuracy of the network on the test images: {test_stats['acc1']:.1f}%")
 
             preds = []
             targets = []
@@ -335,7 +335,7 @@ def main(args):
                 
         if epoch % args.ckpt_freq==0 or epoch == args.epochs-1:
             test_stats = evaluate(data_loader_val, model, device)
-            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            print(f"Accuracy of the network on the test images: {test_stats['acc1']:.1f}%")
             log_stats.update({f'test/{k}': v for k, v in test_stats.items()})
 
             max_accuracy = max(max_accuracy, test_stats["acc1"])
