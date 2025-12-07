@@ -8,9 +8,12 @@ from torch.utils.data import Dataset
 
 class Cub2011(Dataset):
     base_folder = 'CUB_200_2011/images'
-    url = 'http://www.vision.caltech.edu/visipedia-data/CUB-200-2011/CUB_200_2011.tgz'
+    url = "https://data.caltech.edu/records/65de6-vp158/files/CUB_200_2011.tgz"
+    seg_url = 'https://data.caltech.edu/records/w9d68-gec53/files/segmentations.tgz'
     filename = 'CUB_200_2011.tgz'
     tgz_md5 = '97eceeb196236b17998738112f37df78'
+    seg_filename = 'segmentations.tgz'
+    seg_md5 = '56989585210501b1f12e9e5d8ad97edd'
 
     def __init__(self, root, train=True, transform=None, loader=default_loader, download=True):
         self.root = os.path.expanduser(root)
@@ -32,14 +35,26 @@ class Cub2011(Dataset):
                                          sep=' ', names=['img_id', 'target'])
         train_test_split = pd.read_csv(os.path.join(self.root, 'CUB_200_2011', 'train_test_split.txt'),
                                        sep=' ', names=['img_id', 'is_training_img'])
-
+        classes = pd.read_csv(os.path.join(self.root, 'CUB_200_2011', 'classes.txt'),
+                             sep=' ', names=['class_id', 'class_name'])
         data = images.merge(image_class_labels, on='img_id')
         self.data = data.merge(train_test_split, on='img_id')
-
+        self.classes = classes
         if self.train:
             self.data = self.data[self.data.is_training_img == 1]
         else:
             self.data = self.data[self.data.is_training_img == 0]
+            
+    def _load_attributes(self):
+        class_attributes_file = os.path.join(self.root, 'CUB_200_2011', 'attributes', 'class_attribute_labels_continuous.txt')
+        class_attributes = pd.read_csv(class_attributes_file, sep=' ', header=None)        
+        self.class_attributes = class_attributes
+        
+
+    def _load_segmentations(self):
+        segmentations = pd.read_csv(os.path.join(self.root, 'CUB_200_2011', 'segmentations', 'segmentations.txt'),
+                                    sep=' ', names=['img_id', 'segmentation'])
+        self.segmentations = segmentations
 
     def _check_integrity(self):
         try:
@@ -66,10 +81,12 @@ class Cub2011(Dataset):
             print('https://data.caltech.edu/records/65de6-vp158')
 
         download_url(self.url, self.root, self.filename, self.tgz_md5)
-
         with tarfile.open(os.path.join(self.root, self.filename), "r:gz") as tar:
             tar.extractall(path=self.root)
-
+        # download_url(self.seg_url, self.root, self.seg_filename, self.seg_md5)
+        # with tarfile.open(os.path.join(self.root, self.seg_filename), "r:gz") as tar:
+        #     tar.extractall(path=self.root)
+            
     def __len__(self):
         return len(self.data)
 

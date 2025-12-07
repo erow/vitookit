@@ -2,7 +2,14 @@
 
 
 ## CIFAR10
+
+### results
+All experiments are run on CIFAR10 dataset with image size 32x32. The results are shared at [WANDB](https://wandb.ai/erow/mvit).
+
+
+### running scripts
 ```bash
+# vit: 95.66
 WANDB_NAME=cifar-vitt sbatch hpc/svitrun.sh eval_cls.py --opt adamw --lr 1e-3 --warmup_epochs=10 --epochs 200 --batch_size=256 --ra=3 --weight_decay 0.05 --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --gin build_transform.scale="(0.8,1)" "build_transform.mean=(0.4914, 0.4822, 0.4465)" "build_transform.std=(0.2470, 0.2435, 0.2616)" build_model.img_size=32 build_model.patch_size=2 --model vit_tiny_patch16_224 --output_dir ../outputs/mvit/cifar_vit_tiny
 
 

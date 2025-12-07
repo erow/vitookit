@@ -131,7 +131,24 @@ def build_dataset(args, is_train, trnsfrm=None,):
     elif data_set == 'MNIST':
         dataset = datasets.MNIST(args.data_location, is_train, transform=tfm, download=True)
         nb_classes = 10
-        
+    elif data_set == 'hf':
+        from datasets import load_dataset
+        class HFWrapper:
+            def __init__(self, dataset, transform):
+                self.dataset = dataset
+                self.transform = transform
+            def __len__(self):
+                return len(self.dataset)
+            def __getitem__(self, idx):
+                item = self.dataset[idx]
+                img = item['image']
+                if self.transform:
+                    img = self.transform(img)
+                label = item['label']
+                return img, label
+        dataset = load_dataset(args.data_location, split='train' if is_train else 'validation')
+        dataset = HFWrapper(dataset, tfm)
+        nb_classes = args.nb_classes
     else:
         print('dataloader of {} is not implemented .. please add the dataloader under datasets folder.'.format(data_set))
         raise NotImplementedError(data_set,args.data_location)

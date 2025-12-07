@@ -199,7 +199,7 @@ def get_args_parser():
                         help='Overrides config values. e.g. --gin "section.option=value"')
 
     # distributed training parameters
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    parser.add_argument("--local_rank", "--local-rank", default=0, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
     return parser

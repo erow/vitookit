@@ -1,11 +1,7 @@
 #!/usr/bin/env python
 """
-@article{wu2024rethinking,
-  title={Rethinking positive pairs in contrastive learning},
-  author={Wu, Jiantao and Atito, Sara and Feng, Zhenhua and Mo, Shentong and Kitler, Josef and Awais, Muhammad},
-  journal={arXiv preprint arXiv:2410.18200},
-  year={2024}
-}
+Implementation of Supcon: Supervised Contrastive Learning
+
 """
 import argparse
 import torch
@@ -92,33 +88,38 @@ class BasicGate(OpenGate):
                 gate2 = self.mlp(self.label_embedding(y2)).sigmoid()
                 gate = gate1 * gate2
         return gate
-
-def apply_gate(gate, x1, x2):
-    x1 = torch.einsum("bk,bk->bk",x1,gate)
-    x2 = torch.einsum("nk,bk->bnk",x2,gate)
-    x1 =  F.normalize(x1,p=2,dim=-1)
-    x2 =  F.normalize(x2,p=2,dim=-1)
-    return x1, x2
-
-def contrast(x1,x2):
-    if x2.dim() == 3:
+    
+class Filter(nn.Module):
+    def __init__(self,num_classes, embed_dim, gate_fn=BasicGate):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.gate = gate_fn(embed_dim,num_classes=num_classes)
+    
+    def forward(self, x1,x2,y1,y2=None):
+        gate = self.gate(y1,y2)
+        x1 = torch.einsum("bk,bk->bk",x1,gate)
+        x2 = torch.einsum("nk,bk->bnk",x2,gate)
+        x1 =  F.normalize(x1,p=2,dim=-1)
+        x2 =  F.normalize(x2,p=2,dim=-1)
+        return x1, x2
+    
+    def contrast(self,x1,x2):
         logits =  torch.einsum("bj,bnj->bn",x1,x2)
-    else:
-        logits = x1 @ x2.t()
-    return logits
+        return logits
+
 
 @gin.configurable
-class SimLAP(nn.Module):
+class SupCon(nn.Module):
     def __init__(self,
                  backbone: nn.Module,
                  embed_dim=512,
                  out_dim=256,
                  mlp_dim=2048, 
-                 type='arbitrary',
+                 type='identical',
                  temperature=0.1,
                  sup_loss=False, # whether to use supervised loss
                  num_classes=1000):
-        super(SimLAP, self).__init__()
+        super(SupCon, self).__init__()
         assert type in ['arbitrary','identical','distinct']
         self.type = type
         self.s = 1 / temperature
@@ -129,8 +130,7 @@ class SimLAP(nn.Module):
         self.embed_dim = embed_dim
         self.backbone = backbone
         self.projector = build_head(2,embed_dim,mlp_dim,out_dim, last_norm='ln')
-        self.filter = BasicGate(out_dim, num_classes=num_classes)
-        
+        self.filter = Filter(num_classes=num_classes,embed_dim=out_dim)
         
         self.cls_head = nn.Linear(embed_dim,num_classes)
         
@@ -201,23 +201,20 @@ class SimLAP(nn.Module):
     
     def disparate_loss(self, z1, k2, y1, posy):
         k2 = misc.concat_all_gather_grad(k2)
-        gate = self.filter(y1,posy)
-        z1 = F.normalize(z1,p=2,dim=-1)
-        k2 = F.normalize(k2,p=2,dim=-1)
-        logits = contrast(z1*gate*gate,k2) * self.s 
-        # fz1,fz2 = apply_gate(gate, z1, k2)
-        # logits = contrast(fz1,fz2) * self.s
-
-        c1_mask = (y1.unsqueeze(1) == misc.concat_all_gather(y1).unsqueeze(0)) # exclude samples from y1
-        c2_mask = (posy.unsqueeze(1) == misc.concat_all_gather(y1).unsqueeze(0)) # exclude samples from y2
-        class_mask = c1_mask|c2_mask
+        posy = misc.concat_all_gather(posy)
+        
+        fz1,fz2 = F.normalize(z1,p=2,dim=-1), F.normalize(k2,p=2,dim=-1)        
+        scale = self.s
+        cosine = fz1 @ fz2.t()  # b x N
+        logits = scale * cosine
+        
+        c1_mask = (y1.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y1
+        c2_mask = (posy.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y2
+        class_mask = c1_mask | c2_mask
         neg_mask = ~class_mask
 
         loss = multipos_ce_loss(logits, c2_mask, neg_mask)
         
-        self.log['activation'] = gate.sum(1).mean().item()
-        entropy = torch.distributions.Bernoulli(gate).entropy().mean()
-        self.log['entropy'] = entropy.item()
         return loss
 
 from vitookit.evaluation import eval_cls
@@ -230,7 +227,7 @@ def pre_train(args,model,data_loader_train, data_loader_val):
         embed_dim = model.embed_dim
         model.head = torch.nn.Identity()
     
-    model = SimLAP(model,num_classes=args.nb_classes, embed_dim=embed_dim)
+    model = SupCon(model,num_classes=args.nb_classes, embed_dim=embed_dim)
     model.cuda()
     _train(args,model,data_loader_train, data_loader_val)
 
@@ -253,7 +250,7 @@ def train_one_epoch(model: torch.nn.Module, _criterion: torch.nn.Module,
         targets = targets.to(device, non_blocking=True)
 
         lr_scheduler.step(epoch+itr/len(data_loader))
-        # if mixup_fn is not None: disable mixup for simlap
+        # if mixup_fn is not None: disable mixup for SupCon
         #     samples, targets = mixup_fn(samples, targets)
 
         with torch.amp.autocast('cuda',enabled=True if loss_scaler is not None else False):
@@ -304,7 +301,7 @@ def train_one_epoch(model: torch.nn.Module, _criterion: torch.nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('Simlap training script', parents=[eval_cls.get_args_parser()])
+    parser = argparse.ArgumentParser('SupCon training script', parents=[eval_cls.get_args_parser()])
     args = parser.parse_args()
     # hack to replace the train function
     eval_cls.train = pre_train

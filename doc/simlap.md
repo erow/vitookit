@@ -23,8 +23,10 @@ Our findings suggest that arbitrary pairs, often dismissed as irrelevant, are in
 ## Run
 
 ```bash
-# simlap:  90.86, 90.47
+# simlap:  90.86, 90.7
 vitrun simlap.py --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 50  --batch_size=256  --ra=3  --smoothing=0 --mixup=0 --cutmix=0 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8   --output_dir outputs/simlap/cifar10_resnet18
+
+WANDB_NAME=simlap_vitb-in1k sbatch ~/storchrun.sh simlap.py --batch_size=512 --data_set ffcv --train_path ~/storage/data/ffcv/IN1K_smart_500.ffcv --val_path ~/storage/data/ffcv/IN1K_val_500_100.ffcv --smoothing=0 --mixup=0 --cutmix=0  --output_dir outputs/simlap_vitb-in1k
 
 # supcon:  89.9
 vitrun supcon.py --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 50  --batch_size=256  --ra=3  --smoothing=0 --mixup=0 --cutmix=0 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8   --output_dir outputs/supcon/cifar10_resnet18
@@ -32,7 +34,7 @@ vitrun supcon.py --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warm
 # supcon with arbitrary pairs: 25.3
 WANDB_NAME=supcon_arbitrary vitrun supcon.py --ckpt_freq 2 --opt adam --lr 0.001 --weight_decay 5e-4  --warmup_epochs=2 --epochs 50  --batch_size=256  --ra=3  --smoothing=0 --mixup=0 --cutmix=0 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8 SupCon.type="'arbitrary'"  --output_dir outputs/supcon/cifar10_resnet18_arbitrary
 
-# ft
+# ft 
 WANDB_NAME=ft_simlap vitrun --master_port 2134 eval_cls.py  --ckpt_freq 2 --opt sgd --lr 0.1  --layer_decay=0.65  --weight_decay 5e-4 --warmup_epochs=5 --epochs 100 --batch_size=256  --ra=3  --smoothing=0.1 --reprob 0.1 --data_set CIFAR10 --data_location ../data --input_size 32 --model resnet18 --gin "build_transform.scale=(0.7,1)" build_transform.mean="(0.4914, 0.4822, 0.4465)" build_transform.std="(0.2470, 0.2435, 0.2616)" build_model.stem_type="'deep'" build_model.output_stride=8 --checkpoint_key model --prefix='backbone.(.*)' -w outputs/simlap/cifar10_resnet18/checkpoint.pth --output_dir outputs/simlap/cifar10_resnet18/ft
 
 # fuse
