@@ -2,6 +2,7 @@
 # @description 
 
 # untrace dirs
+data
 outputs
 wandb
 results

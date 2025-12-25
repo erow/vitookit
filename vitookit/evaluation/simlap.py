@@ -172,13 +172,17 @@ class SimLAP(nn.Module):
     def criterion(self, samples, targets, **kwargs):
         self.log = {}
         rep = self.backbone(samples)
+        # clip representations to prevent large running variance
         if self.sup_loss:
             predict = self.cls_head(rep)
         else:            
             predict = self.cls_head(rep.detach())
-
+        loss_sup = F.cross_entropy(predict, targets)
+        
         z = self.projector(rep)
-
+        z1 = z[::2].contiguous()
+        z2 = z[1::2].contiguous()
+        targets = targets[::2].contiguous()
         y1 = targets
         if self.type == 'identical':
             y2 = targets
@@ -187,10 +191,14 @@ class SimLAP(nn.Module):
         else:
             y2 = targets[torch.randperm(len(targets),device=targets.device)]
 
-        loss = self.disparate_loss(z,z,y1,y2)
-        loss += F.cross_entropy(predict, targets)
-
-        self.log['z@std'] = z.std(0).mean().item()
+        loss_disparate = self.disparate_loss(z1,z2,y1,y2)
+        loss = loss_sup + loss_disparate
+        
+        self.log['loss_sup'] = loss_sup.item()
+        self.log['loss_disparate'] = loss_disparate.item()
+        self.log['z@std'] = z1.std(0).mean().item()
+        self.log['bn_running_mean'] = self.backbone.layer4[2].bn3.running_mean.max().item()
+        self.log['bn_running_var'] = self.backbone.layer4[2].bn3.running_var.max().item()
         return loss, self.log
 
     def forward(self, samples, **kwargs):
@@ -208,8 +216,9 @@ class SimLAP(nn.Module):
         # fz1,fz2 = apply_gate(gate, z1, k2)
         # logits = contrast(fz1,fz2) * self.s
 
-        c1_mask = (y1.unsqueeze(1) == misc.concat_all_gather(y1).unsqueeze(0)) # exclude samples from y1
-        c2_mask = (posy.unsqueeze(1) == misc.concat_all_gather(y1).unsqueeze(0)) # exclude samples from y2
+        all_y1 = misc.concat_all_gather(y1)
+        c1_mask = (y1.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y1
+        c2_mask = (posy.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y2
         class_mask = c1_mask|c2_mask
         neg_mask = ~class_mask
 

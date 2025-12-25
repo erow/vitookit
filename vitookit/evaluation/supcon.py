@@ -34,86 +34,12 @@ def multipos_ce_loss(logits, pos_mask,neg_mask=None):
    
     return loss
 
-class OpenGate(nn.Module):
-    def __init__(self, embed_dim,num_classes):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.num_classes = num_classes
-
-    def forward(self,y1,y2=None,log=None):
-        bs = y1.size(0)
-        gate = torch.ones(bs,self.embed_dim,device=y1.device)
-        return gate
-
-
-class BasicGate(OpenGate):
-    def __init__(self, embed_dim, num_classes=1000, in_dim=512, 
-                 mlp_dim=1024,
-                 lam = 0, fuse=True):
-        super().__init__(embed_dim,num_classes)
-        
-        self.mlp = nn.Sequential(
-            nn.ReLU(), nn.BatchNorm1d(in_dim),
-            nn.Linear(in_dim, mlp_dim),
-            nn.ReLU(), nn.BatchNorm1d(mlp_dim),
-            nn.Linear(mlp_dim, embed_dim),            
-        )
-        self.label_embedding = nn.Embedding(num_classes,in_dim)
-        self.lam = lam
-        self.fuse = fuse
-
-    def statistics(self):
-        labels = torch.arange(self.num_classes).cuda()
-        label_embeds = self.label_embedding(labels)
-        logits = self.mlp(label_embeds)
-        gates = logits.sigmoid()
-        activation = gates.sum(1).mean()
-        entropy = torch.distributions.Bernoulli(gates).entropy().mean()
-        return activation, entropy
-    
-    def forward(self,y1,y2=None,log=None):
-        if self.fuse:      
-            if y2 is None:
-                label_embeds = self.label_embedding(y1)
-            else:
-                label_embeds = (self.label_embedding(y1) + self.label_embedding(y2))/2
-            
-            logits = self.mlp(label_embeds)
-            gate = logits.sigmoid()
-        else:
-            if y2 is None:
-                gate = self.mlp(self.label_embedding(y1)).sigmoid()
-            else:
-                gate1 = self.mlp(self.label_embedding(y1)).sigmoid()
-                gate2 = self.mlp(self.label_embedding(y2)).sigmoid()
-                gate = gate1 * gate2
-        return gate
-    
-class Filter(nn.Module):
-    def __init__(self,num_classes, embed_dim, gate_fn=BasicGate):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.gate = gate_fn(embed_dim,num_classes=num_classes)
-    
-    def forward(self, x1,x2,y1,y2=None):
-        gate = self.gate(y1,y2)
-        x1 = torch.einsum("bk,bk->bk",x1,gate)
-        x2 = torch.einsum("nk,bk->bnk",x2,gate)
-        x1 =  F.normalize(x1,p=2,dim=-1)
-        x2 =  F.normalize(x2,p=2,dim=-1)
-        return x1, x2
-    
-    def contrast(self,x1,x2):
-        logits =  torch.einsum("bj,bnj->bn",x1,x2)
-        return logits
-
-
 @gin.configurable
 class SupCon(nn.Module):
     def __init__(self,
                  backbone: nn.Module,
                  embed_dim=512,
-                 out_dim=256,
+                 out_dim=128,
                  mlp_dim=2048, 
                  type='identical',
                  temperature=0.1,
@@ -123,42 +49,20 @@ class SupCon(nn.Module):
         assert type in ['arbitrary','identical','distinct']
         self.type = type
         self.s = 1 / temperature
+        # self.s = nn.Parameter(torch.tensor(1 / temperature, requires_grad=True))
         self.num_classes = num_classes
         self.out_dim = out_dim
         self.sup_loss = sup_loss
         
         self.embed_dim = embed_dim
         self.backbone = backbone
-        self.projector = build_head(2,embed_dim,mlp_dim,out_dim, last_norm='ln')
-        self.filter = Filter(num_classes=num_classes,embed_dim=out_dim)
+        self.projector = nn.Linear(embed_dim,out_dim)
+        
         
         self.cls_head = nn.Linear(embed_dim,num_classes)
+        self.views = 2
+        # self.loss_fn = SupConLoss(temperature=temperature)
         
-
-    @torch.jit.ignore
-    def no_weight_decay(self) -> "Set[str]":
-        """Set of parameters that should not use weight decay."""
-        if hasattr(self.backbone, 'no_weight_decay'):
-            backbone = self.backbone.no_weight_decay()
-            return {'backbone.'+k for k in backbone}
-        return set()
-
-    @torch.jit.ignore
-    def group_matcher(self, coarse: bool = False) -> "Dict[str, Union[str, List]]":
-        """Create regex patterns for parameter grouping.
-
-        Args:
-            coarse: Use coarse grouping.
-
-        Returns:
-            Dictionary mapping group names to regex patterns.
-        """
-        
-        return dict(
-            stem=r'cls_token|pos_embed|patch_embed',  # stem and embed
-            blocks=[(r'backbone\.blocks\.(\d+)', None), (r'backbone\.norm', (99999,))],
-            head=r'projector|cls_head|filter'
-        )
 
     @torch.no_grad()
     def representation(self, x):
@@ -176,21 +80,35 @@ class SupCon(nn.Module):
             predict = self.cls_head(rep)
         else:            
             predict = self.cls_head(rep.detach())
-
+        loss_sup = F.cross_entropy(predict, targets)
         z = self.projector(rep)
+        # z = z.reshape(len(samples)//self.views,self.views,-1)
+        # targets = targets[::self.views].contiguous()
 
-        y1 = targets
+        y1 = targets.clone()
         if self.type == 'identical':
             y2 = targets
         elif self.type == 'distinct':
-            y2 = (targets + torch.randint(1,self.num_classes,(len(targets),),device=targets.device))%self.num_classes
+            y2 = (targets + torch.randint(1,self.num_classes,(len(y1),),device=targets.device))%self.num_classes
         else:
-            y2 = targets[torch.randperm(len(targets),device=targets.device)]
+            y2 = targets[torch.randperm(len(y1),device=targets.device)].contiguous()
 
-        loss = self.disparate_loss(z,z,y1,y2)
-        loss += F.cross_entropy(predict, targets)
-
+        # loss_disparate = 0
+        # for i in range(self.views):
+        #     for j in range(self.views):
+        #         if i == j and self.views !=1:
+        #             continue
+        #         loss_disparate += self.disparate_loss(z[:,i],z[:,j].contiguous(),y1,y2)
+        # loss_disparate /= self.views*(self.views-1)
+        loss_disparate = self.disparate_loss(z,z.detach(),y1,y2)
+        loss = loss_sup + loss_disparate
+        self.log['loss_sup'] = loss_sup.item()
+        self.log['loss_disparate'] = loss_disparate.item()
+        self.log['bn_running_mean'] = self.backbone.layer4[2].bn3.running_mean.max().item()
+        self.log['bn_running_var'] = self.backbone.layer4[2].bn3.running_var.max().item()
         self.log['z@std'] = z.std(0).mean().item()
+        self.log['z@norm'] = z.norm(2,dim=-1).mean().item()
+        self.log['rep@norm'] = rep.norm(2,dim=-1).mean().item()
         return loss, self.log
 
     def forward(self, samples, **kwargs):
@@ -200,16 +118,15 @@ class SupCon(nn.Module):
     
     
     def disparate_loss(self, z1, k2, y1, posy):
-        k2 = misc.concat_all_gather_grad(k2)
-        posy = misc.concat_all_gather(posy)
+        k2 = misc.concat_all_gather(k2)
         
-        fz1,fz2 = F.normalize(z1,p=2,dim=-1), F.normalize(k2,p=2,dim=-1)        
-        scale = self.s
+        fz1,fz2 = F.normalize(z1,p=2,dim=-1), F.normalize(k2,p=2,dim=-1)
         cosine = fz1 @ fz2.t()  # b x N
-        logits = scale * cosine
-        
-        c1_mask = (y1.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y1
-        c2_mask = (posy.unsqueeze(1) == (y1).unsqueeze(0)) # exclude samples from y2
+        logits = cosine * self.s
+
+        all_y1 = misc.concat_all_gather(y1)
+        c1_mask = (y1.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y1
+        c2_mask = (posy.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y2
         class_mask = c1_mask | c2_mask
         neg_mask = ~class_mask
 
@@ -226,8 +143,13 @@ def pre_train(args,model,data_loader_train, data_loader_val):
     else:
         embed_dim = model.embed_dim
         model.head = torch.nn.Identity()
-    
+    if wandb.run:
+        try:
+            wandb.watch(model.layer4[2],log='all')
+        except:
+            pass
     model = SupCon(model,num_classes=args.nb_classes, embed_dim=embed_dim)
+    model.views = args.ra
     model.cuda()
     _train(args,model,data_loader_train, data_loader_val)
 
@@ -304,6 +226,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('SupCon training script', parents=[eval_cls.get_args_parser()])
     args = parser.parse_args()
     # hack to replace the train function
+    args.mixup=0
+    args.cutmix=0
+    
     eval_cls.train = pre_train
     eval_cls.train_one_epoch = train_one_epoch
     eval_cls.main(args)

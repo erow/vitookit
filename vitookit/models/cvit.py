@@ -115,8 +115,8 @@ def cvit_tiny_4ch(**kwargs):
         embed_dim=192,
         depth=12,
         num_heads=3,
-        patch_size=4,
-        img_size=32,
+        patch_size=16,
+        img_size=224,
     )
     default_cfg.update(kwargs)
     model = _create_model('cvit_tiny_4ch', **default_cfg)

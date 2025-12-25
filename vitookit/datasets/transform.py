@@ -6,6 +6,8 @@ from torchvision import transforms
 import torch
 import gin
 from torch import nn
+import torch.nn.functional as F
+from typing import Optional
 
 class PermutePatch(object):
     """

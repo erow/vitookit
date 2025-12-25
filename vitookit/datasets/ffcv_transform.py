@@ -7,6 +7,7 @@ from ffcv.transforms.solarization import RandomSolarization
 from ffcv.fields.decoders import IntDecoder, RandomResizedCropRGBImageDecoder, SimpleRGBImageDecoder, CenterCropRGBImageDecoder
 from ffcv import Loader
 from ffcv.loader import OrderOption
+from ffcv.traversal_order import Random
 
 import torch
 import torchvision.transforms.v2 as tfms
@@ -15,7 +16,7 @@ from torch import nn
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406]) * 255
 IMAGENET_STD = np.array([0.229, 0.224, 0.225]) * 255
-
+    
 @gin.configurable
 def SimplePipeline(img_size=224,scale=(0.2,1), ratio=(3.0/4.0, 4.0/3.0),device='cuda'):
     device = torch.device(device)
@@ -127,7 +128,21 @@ def build_ffcv_loader(args):
     train_transform = ThreeAugmentPipeline(img_size=args.input_size,device=args.device)
     val_transform = ValPipeline(img_size=args.input_size,device=args.device)
     order = OrderOption.RANDOM if args.distributed else OrderOption.QUASI_RANDOM
-    
+    if args.ra>1:
+        repeat = args.ra
+        class RepeatedRandom(Random):
+            def __init__(self, loader:'Loader'):
+                super().__init__(loader)
+
+            def sample_order(self, epoch: int):
+                order = super().sample_order(epoch)
+                new_order = []
+                for idx in order:
+                    new_order.extend([idx] * repeat)
+                return new_order
+                        
+        order = RepeatedRandom
+        
     data_loader_train =  Loader(args.train_path, pipelines=train_transform,batches_ahead=10,
                         batch_size=args.batch_size, num_workers=args.num_workers, 
                         order=order, distributed=args.distributed,seed=args.seed)

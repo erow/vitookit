@@ -67,3 +67,9 @@ Transform: Compose(
     Normalize(mean=tensor([0.4914, 0.4822, 0.4465]), std=tensor([0.2470, 0.2435, 0.2616]))
 )
 ```
+
+## ImageNet1K classification
+
+```bash
+eval_cls.py  --data_set ffcv --train_path $train_path --val_path $val_path --model mvit3_base_patch16_LS --gin build_model.pretrained=True --output_dir ~/storage/experiments/mvit/in1k-mvit_base
+```

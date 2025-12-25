@@ -15,13 +15,15 @@ import argparse
 import datetime
 import re
 import time
-import torch
-import torch.distributed as dist
-import torch.backends.cudnn as cudnn
 import json
 import os
 import math
 import sys
+import torch
+import torch.distributed as dist
+import torch.backends.cudnn as cudnn
+from torch import nn
+
 
 from vitookit.utils.helper import *
 from vitookit.utils import misc
@@ -31,8 +33,7 @@ from vitookit.models.build_model import build_model
 
 import timm
 import timm.optim
-from timm.layers import (convert_splitbn_model, convert_sync_batchnorm,
-                         set_fast_norm)
+from timm.layers import (convert_sync_batchnorm, set_fast_norm)
 from timm.utils.model_ema import ModelEmaV3
 import wandb
 
@@ -66,9 +67,14 @@ def get_args_parser():
     parser.add_argument("--dynamic_resolution", default=False, action="store_true", help="Use dynamic resolution.")
 
     # Model parameters
+    
     parser.add_argument("--model", default='vit_base_patch16_224', type=str, help="model name")
     parser.add_argument('--ema_decay', type=float, default=0.0, help='EMA decay rate')
     parser.add_argument("--compile", action='store_true', default=False, help="compile model with PyTorch 2.0")
+    parser.add_argument("--sync_bn", action='store_true', default=False, help="Use SyncBatchNorm for distributed training")
+    parser.add_argument("--fast_norm", action='store_true', default=False, help="Use fast normalization (fused LayerNorm/RMSNorm)")
+    parser.add_argument("--inst_norm", action='store_true', default=False, help="Use InstanceNorm")
+    parser.add_argument('--norm_clip', type=float, default=None, help="Clip normalization statistics.")
     parser.add_argument("--prefix", default=None, type=str, help="prefix of the model name")
     
     parser.add_argument('--input_size', default=224, type=int, help='images input size')
@@ -207,7 +213,7 @@ def get_args_parser():
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,lr_scheduler, max_norm: float = 0,
-                     mixup_fn: Optional[Mixup] = None, accum_iter=1,
+                    mixup_fn: Optional[Mixup] = None, accum_iter=1,
                     model_ema: Optional[torch.nn.Module] = None
                     ):
     model.train(True)
@@ -253,7 +259,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 'targets':targets,
             }
             if wandb.run:
-                torch.save(error_dict, args.output_dir+'/error.pth')
+                torch.save(error_dict, wandb.run.dir+'/error.pth')
+            else:
+                torch.save(error_dict, 'error.pth')
             dist.destroy_process_group()
             sys.exit(1)
         # this attribute is added by timm on one optimizer (adahessian)
@@ -342,9 +350,6 @@ def main(args):
     
     if args.train_path:
         data_loader_train, data_loader_val = build_ffcv_loader(args)
-        # preload ffcv dataset 
-        for _ in data_loader_train: pass
-        for _ in data_loader_val: pass
     else:
         data_loader_train, data_loader_val = build_loader(args)
     
@@ -356,7 +361,12 @@ def main(args):
 
 def train(args,model,data_loader_train, data_loader_val):
 
-    model = convert_sync_batchnorm(model)
+    # convert norm
+    if args.sync_bn and args.distributed:
+        model = convert_sync_batchnorm(model)
+    if args.fast_norm:
+        set_fast_norm(model)
+    
     model_without_ddp = model
     print(f"Built Model ", model)
     import torch
@@ -531,7 +541,7 @@ def train(args,model,data_loader_train, data_loader_val):
                         'lr_scheduler': lr_scheduler.state_dict(),
                         'epoch': epoch,
                         'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
-                        'args': args,
+                        'args': vars(args),
                     }, output_dir / checkpoint_path)
             else:
                 misc.save_on_master({
@@ -540,7 +550,7 @@ def train(args,model,data_loader_train, data_loader_val):
                         'lr_scheduler': lr_scheduler.state_dict(),
                         'epoch': epoch,
                         'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
-                        'args': args,
+                        'args': vars(args),
                     }, output_dir / "checkpoint.pth")
                 
             if wandb.run: wandb.log(log_stats)
