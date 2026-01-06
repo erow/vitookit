@@ -308,11 +308,10 @@ def main(args):
             if output_dir:
                 with (output_dir / "log.txt").open("a") as f:
                     f.write(json.dumps(log_stats) + "\n")  
-    dist.barrier()
-    if misc.get_rank() == 0:
-        return log_stats
     else:
-        return None
+        log_stats = None
+    dist.destroy_process_group()
+    return log_stats
 if __name__ == '__main__':
     
     

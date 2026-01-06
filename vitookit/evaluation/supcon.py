@@ -82,8 +82,6 @@ class SupCon(nn.Module):
             predict = self.cls_head(rep.detach())
         loss_sup = F.cross_entropy(predict, targets)
         z = self.projector(rep)
-        # z = z.reshape(len(samples)//self.views,self.views,-1)
-        # targets = targets[::self.views].contiguous()
 
         y1 = targets.clone()
         if self.type == 'identical':
@@ -93,19 +91,10 @@ class SupCon(nn.Module):
         else:
             y2 = targets[torch.randperm(len(y1),device=targets.device)].contiguous()
 
-        # loss_disparate = 0
-        # for i in range(self.views):
-        #     for j in range(self.views):
-        #         if i == j and self.views !=1:
-        #             continue
-        #         loss_disparate += self.disparate_loss(z[:,i],z[:,j].contiguous(),y1,y2)
-        # loss_disparate /= self.views*(self.views-1)
-        loss_disparate = self.disparate_loss(z,z.detach(),y1,y2)
+        loss_disparate = self.disparate_loss(z,z,y1,y2)
         loss = loss_sup + loss_disparate
         self.log['loss_sup'] = loss_sup.item()
         self.log['loss_disparate'] = loss_disparate.item()
-        self.log['bn_running_mean'] = self.backbone.layer4[2].bn3.running_mean.max().item()
-        self.log['bn_running_var'] = self.backbone.layer4[2].bn3.running_var.max().item()
         self.log['z@std'] = z.std(0).mean().item()
         self.log['z@norm'] = z.norm(2,dim=-1).mean().item()
         self.log['rep@norm'] = rep.norm(2,dim=-1).mean().item()
@@ -118,7 +107,7 @@ class SupCon(nn.Module):
     
     
     def disparate_loss(self, z1, k2, y1, posy):
-        k2 = misc.concat_all_gather(k2)
+        k2 = misc.concat_all_gather_grad(k2)
         
         fz1,fz2 = F.normalize(z1,p=2,dim=-1), F.normalize(k2,p=2,dim=-1)
         cosine = fz1 @ fz2.t()  # b x N

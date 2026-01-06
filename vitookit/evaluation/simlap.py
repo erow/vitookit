@@ -180,9 +180,6 @@ class SimLAP(nn.Module):
         loss_sup = F.cross_entropy(predict, targets)
         
         z = self.projector(rep)
-        z1 = z[::2].contiguous()
-        z2 = z[1::2].contiguous()
-        targets = targets[::2].contiguous()
         y1 = targets
         if self.type == 'identical':
             y2 = targets
@@ -191,14 +188,14 @@ class SimLAP(nn.Module):
         else:
             y2 = targets[torch.randperm(len(targets),device=targets.device)]
 
-        loss_disparate = self.disparate_loss(z1,z2,y1,y2)
+        loss_disparate = self.disparate_loss(z,z,y1,y2)
         loss = loss_sup + loss_disparate
         
         self.log['loss_sup'] = loss_sup.item()
         self.log['loss_disparate'] = loss_disparate.item()
-        self.log['z@std'] = z1.std(0).mean().item()
-        self.log['bn_running_mean'] = self.backbone.layer4[2].bn3.running_mean.max().item()
-        self.log['bn_running_var'] = self.backbone.layer4[2].bn3.running_var.max().item()
+        self.log['z@std'] = z.std(0).mean().item()
+        # self.log['bn_running_mean'] = self.backbone.layer4[2].bn3.running_mean.max().item()
+        # self.log['bn_running_var'] = self.backbone.layer4[2].bn3.running_var.max().item()
         return loss, self.log
 
     def forward(self, samples, **kwargs):
@@ -213,8 +210,6 @@ class SimLAP(nn.Module):
         z1 = F.normalize(z1,p=2,dim=-1)
         k2 = F.normalize(k2,p=2,dim=-1)
         logits = contrast(z1*gate*gate,k2) * self.s 
-        # fz1,fz2 = apply_gate(gate, z1, k2)
-        # logits = contrast(fz1,fz2) * self.s
 
         all_y1 = misc.concat_all_gather(y1)
         c1_mask = (y1.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y1
