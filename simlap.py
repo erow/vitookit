@@ -13,7 +13,6 @@ import torch.distributed as dist
 import math
 import sys
 import wandb
-import numpy as np
 
 from typing import Iterable, Optional
 from timm.data import Mixup
@@ -23,75 +22,6 @@ from torch import nn
 from vitookit.models.build_model import build_head
 from vitookit.utils import misc
 from vitookit.utils.helper import *
-
-
-class PKSampler(torch.utils.data.Sampler):
-    """
-    PK Sampler for Supervised Contrastive Learning.
-    Samples P classes with K samples each per batch, ensuring each sample
-    has at least K-1 positives in the batch.
-    
-    Supports distributed training by partitioning classes across ranks.
-    """
-    
-    def __init__(self, labels, p_classes, k_samples, num_replicas=None, rank=None, seed=0):
-        """
-        Args:
-            labels: List or array of class labels for each sample
-            p_classes: Number of classes to sample per batch
-            k_samples: Number of samples per class
-            num_replicas: Number of distributed processes (default: world_size)
-            rank: Rank of current process (default: current rank)
-            seed: Random seed for reproducibility
-        """
-        self.labels = np.array(labels)
-        self.p = p_classes
-        self.k = k_samples
-        self.seed = seed
-        self.epoch = 0
-        
-        # Distributed settings
-        if num_replicas is None:
-            num_replicas = misc.get_world_size()
-        if rank is None:
-            rank = misc.get_rank()
-        self.num_replicas = num_replicas
-        self.rank = rank
-        
-        # Build class to indices mapping
-        self.classes = np.unique(self.labels)
-        self.class_to_indices = {c: np.where(self.labels == c)[0] for c in self.classes}
-        
-        # Calculate number of batches per epoch
-        self.batch_size = self.p * self.k
-        self.num_batches = len(self.labels) // (self.batch_size * self.num_replicas)
-        self.total_size = self.num_batches * self.batch_size
-        
-    def __iter__(self):
-        # Deterministic shuffling based on epoch and seed
-        rng = np.random.RandomState(self.seed + self.epoch)
-        
-        for _ in range(self.num_batches):
-            # Sample P classes (each rank samples independently with different random state)
-            batch_rng = np.random.RandomState(rng.randint(0, 2**31) + self.rank)
-            selected_classes = batch_rng.choice(self.classes, self.p, replace=False)
-            
-            indices = []
-            for c in selected_classes:
-                class_indices = self.class_to_indices[c]
-                # Sample with replacement if class has fewer than K samples
-                replace = len(class_indices) < self.k
-                sampled = batch_rng.choice(class_indices, self.k, replace=replace)
-                indices.extend(sampled.tolist())
-            
-            yield from indices
-    
-    def __len__(self):
-        return self.total_size
-    
-    def set_epoch(self, epoch):
-        """Set epoch for deterministic shuffling across epochs."""
-        self.epoch = epoch
 
 def multipos_ce_loss(logits, pos_mask,neg_mask=None):
     if neg_mask is None:
@@ -242,14 +172,13 @@ class SimLAP(nn.Module):
     def criterion(self, samples, targets, **kwargs):
         self.log = {}
         rep = self.backbone(samples)
-        # clip representations to prevent large running variance
         if self.sup_loss:
             predict = self.cls_head(rep)
         else:            
             predict = self.cls_head(rep.detach())
-        loss_sup = F.cross_entropy(predict, targets)
-        
+
         z = self.projector(rep)
+
         y1 = targets
         if self.type == 'identical':
             y2 = targets
@@ -258,14 +187,10 @@ class SimLAP(nn.Module):
         else:
             y2 = targets[torch.randperm(len(targets),device=targets.device)]
 
-        loss_disparate = self.disparate_loss(z,z,y1,y2)
-        loss = loss_sup + loss_disparate
-        
-        self.log['loss_sup'] = loss_sup.item()
-        self.log['loss_disparate'] = loss_disparate.item()
+        loss = self.disparate_loss(z,z,y1,y2)
+        loss += F.cross_entropy(predict, targets)
+
         self.log['z@std'] = z.std(0).mean().item()
-        # self.log['bn_running_mean'] = self.backbone.layer4[2].bn3.running_mean.max().item()
-        # self.log['bn_running_var'] = self.backbone.layer4[2].bn3.running_var.max().item()
         return loss, self.log
 
     def forward(self, samples, **kwargs):
@@ -280,10 +205,11 @@ class SimLAP(nn.Module):
         z1 = F.normalize(z1,p=2,dim=-1)
         k2 = F.normalize(k2,p=2,dim=-1)
         logits = contrast(z1*gate*gate,k2) * self.s 
+        # fz1,fz2 = apply_gate(gate, z1, k2)
+        # logits = contrast(fz1,fz2) * self.s
 
-        all_y1 = misc.concat_all_gather(y1)
-        c1_mask = (y1.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y1
-        c2_mask = (posy.unsqueeze(1) == all_y1.unsqueeze(0)) # exclude samples from y2
+        c1_mask = (y1.unsqueeze(1) == misc.concat_all_gather(y1).unsqueeze(0)) # exclude samples from y1
+        c2_mask = (posy.unsqueeze(1) == misc.concat_all_gather(y1).unsqueeze(0)) # exclude samples from y2
         class_mask = c1_mask|c2_mask
         neg_mask = ~class_mask
 
@@ -295,64 +221,6 @@ class SimLAP(nn.Module):
         return loss
 
 from vitookit.evaluation import eval_cls
-from vitookit.datasets.build_dataset import build_dataset, build_transform
-
-def build_pk_loader(args):
-    """Build data loaders with PK sampling for supervised contrastive learning."""
-    transform = build_transform(is_train=True, args=args)
-    dataset_train, nb_classes = build_dataset(args=args, is_train=True, trnsfrm=transform)
-    dataset_val, _ = build_dataset(is_train=False, args=args)
-    
-    if nb_classes:
-        args.nb_classes = nb_classes
-    
-    print(f"Building PK sampler: P={args.pk_classes} classes, K={args.pk_samples} samples/class")
-    print(f"Effective batch size per GPU: {args.pk_classes * args.pk_samples}")
-    
-    # Extract labels from dataset
-    if hasattr(dataset_train, 'targets'):
-        labels = dataset_train.targets
-    elif hasattr(dataset_train, 'samples'):
-        labels = [s[1] for s in dataset_train.samples]
-    else:
-        raise ValueError("Dataset must have 'targets' or 'samples' attribute for PK sampling")
-    
-    # Create PK sampler
-    sampler_train = PKSampler(
-        labels=labels,
-        p_classes=args.pk_classes,
-        k_samples=args.pk_samples,
-        seed=args.seed
-    )
-    
-    # Validation sampler (standard sequential)
-    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    
-    # Override batch_size to match PK batch
-    pk_batch_size = args.pk_classes * args.pk_samples
-    
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train,
-        sampler=sampler_train,
-        batch_size=pk_batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=True,
-        persistent_workers=True,
-    )
-    
-    data_loader_val = torch.utils.data.DataLoader(
-        dataset_val,
-        sampler=sampler_val,
-        batch_size=int(1.5 * pk_batch_size),
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False,
-        persistent_workers=True,
-    )
-    
-    return data_loader_train, data_loader_val
-
 _train = eval_cls.train
 def pre_train(args,model,data_loader_train, data_loader_val):
     if hasattr(model,'fc'):
@@ -435,66 +303,10 @@ def train_one_epoch(model: torch.nn.Module, _criterion: torch.nn.Module,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def simlap_main(args):
-    """Main function for SimLAP training with optional PK sampling."""
-    misc.init_distributed_mode(args)
-    misc.fix_random_seeds(args.seed)
-    
-    import torch.backends.cudnn as cudnn
-    cudnn.benchmark = True
-    
-    print(args)
-    post_args(args)
-    
-    # Logging
-    if args.output_dir and misc.is_main_process():
-        try:
-            wandb.init(job_type='finetune', dir=args.output_dir, resume=not args.resume is None,
-                       config=args.__dict__)
-        except:
-            pass
-    
-    # Use PK sampling if enabled, otherwise fall back to standard loader
-    if args.pk_classes > 0 and args.pk_samples > 0:
-        data_loader_train, data_loader_val = build_pk_loader(args)
-    else:
-        from vitookit.datasets.build_dataset import build_loader
-        data_loader_train, data_loader_val = build_loader(args)
-    
-    # build the backbone
-    from vitookit.models.build_model import build_model
-    model = build_model(args.model, num_classes=args.nb_classes)
-    
-    if args.pretrained_weights:
-        load_pretrained_weights(model, args.pretrained_weights, 
-                                checkpoint_key=args.checkpoint_key, prefix=args.prefix)
-    
-    pre_train(args, model, data_loader_train, data_loader_val)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Simlap training script', parents=[eval_cls.get_args_parser()])
-    
-    # PK sampling arguments
-    parser.add_argument('--pk_classes', type=int, default=0,
-                        help='Number of classes per batch for PK sampling (P). Set >0 to enable.')
-    parser.add_argument('--pk_samples', type=int, default=2,
-                        help='Number of samples per class for PK sampling (K). Default: 2')
-    
     args = parser.parse_args()
-    
-    # Disable mixup/cutmix for SimLAP (not compatible with contrastive learning)
-    args.mixup = 0
-    args.cutmix = 0
-    
-    # If PK sampling is enabled, update batch_size to match
-    if args.pk_classes > 0 and args.pk_samples > 0:
-        args.batch_size = args.pk_classes * args.pk_samples // misc.get_world_size()
-        print(f"PK Sampling enabled: P={args.pk_classes}, K={args.pk_samples}, batch_size={args.batch_size}")
-        eval_cls.train_one_epoch = train_one_epoch
-        simlap_main(args)
-    else:
-        # Fall back to original behavior
-        eval_cls.train = pre_train
-        eval_cls.train_one_epoch = train_one_epoch
-        eval_cls.main(args)
+    # hack to replace the train function
+    eval_cls.train = pre_train
+    eval_cls.train_one_epoch = train_one_epoch
+    eval_cls.main(args)

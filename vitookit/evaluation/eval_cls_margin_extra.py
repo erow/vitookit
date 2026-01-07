@@ -101,6 +101,7 @@ class MarginHead(nn.Module):
             # Compute sum of elementwise products between z and all non-target class vectors
             # weight vectors are normalized by weight norm (weight property)
             weight_vectors = self.weight.weight_v  # (num_classes, embed_dim)
+            weight_vectors = F.normalize(weight_vectors, dim=1)
             # B x C x D elementwise products then sum over D
             elem_prod = (z.unsqueeze(1) * weight_vectors.unsqueeze(0)).abs().sum(dim=2)
             mask = torch.ones_like(elem_prod, dtype=torch.bool)
